@@ -7,7 +7,17 @@ const config: Config = {
     "./lib/**/*.{js,ts,jsx,tsx,mdx}"
   ],
   theme: {
-    extend: {}
+    extend: {
+      colors: {
+        brand: {
+          navy: "#124E78",
+          cream: "#F0F0C9",
+          gold: "#F2BB05",
+          orange: "#D74E09",
+          burgundy: "#6E0E0A"
+        }
+      }
+    }
   },
   plugins: []
 };
