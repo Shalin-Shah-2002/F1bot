@@ -1,3 +1,7 @@
+import asyncio
+import json
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -21,8 +25,40 @@ class RedditLeadCollector:
         self.user_agent = user_agent
 
     async def fetch_candidate_posts(self, request: LeadScanRequest) -> list[CandidatePost]:
+        max_candidates = max(request.limit * 3, 30)
+        keywords = request.keywords or self._derive_keywords(request.business_description)
+        subreddits = request.subreddits or ["entrepreneur", "smallbusiness", "marketing"]
+
+        if self._has_credentials() and asyncpraw is not None:
+            posts = await self._fetch_with_authenticated_api(
+                subreddits=subreddits,
+                keywords=keywords,
+                request_limit=request.limit,
+                max_candidates=max_candidates,
+            )
+            if posts:
+                return posts
+
+        posts = await self._fetch_with_public_search(
+            subreddits=subreddits,
+            keywords=keywords,
+            request_limit=request.limit,
+            max_candidates=max_candidates,
+        )
+        if posts:
+            return posts
+
+        return self._sample_posts(request)
+
+    async def _fetch_with_authenticated_api(
+        self,
+        subreddits: list[str],
+        keywords: list[str],
+        request_limit: int,
+        max_candidates: int,
+    ) -> list[CandidatePost]:
         if not self._has_credentials() or asyncpraw is None:
-            return self._sample_posts(request)
+            return []
 
         reddit = asyncpraw.Reddit(
             client_id=self.client_id,
@@ -30,10 +66,7 @@ class RedditLeadCollector:
             user_agent=self.user_agent
         )
 
-        max_candidates = max(request.limit * 3, 30)
-        per_query_limit = max(5, request.limit // max(len(request.subreddits), 1))
-        keywords = request.keywords or self._derive_keywords(request.business_description)
-        subreddits = request.subreddits or ["entrepreneur", "smallbusiness", "marketing"]
+        per_query_limit = max(5, request_limit // max(len(subreddits), 1))
 
         collected: dict[str, CandidatePost] = {}
 
@@ -74,14 +107,147 @@ class RedditLeadCollector:
                 if len(collected) >= max_candidates:
                     break
         except Exception:
-            return self._sample_posts(request)
+            return []
         finally:
             await reddit.close()
 
-        if not collected:
-            return self._sample_posts(request)
-
         return list(collected.values())
+
+    async def _fetch_with_public_search(
+        self,
+        subreddits: list[str],
+        keywords: list[str],
+        request_limit: int,
+        max_candidates: int,
+    ) -> list[CandidatePost]:
+        if not subreddits:
+            return []
+
+        per_query_limit = min(25, max(5, request_limit // max(len(subreddits), 1)))
+        collected: dict[str, tuple[CandidatePost, float]] = {}
+
+        for subreddit_name in subreddits:
+            for keyword in keywords[:6]:
+                listing = await asyncio.to_thread(
+                    self._fetch_public_search_listing,
+                    subreddit_name,
+                    keyword,
+                    per_query_limit,
+                )
+
+                for item in listing:
+                    post_data = item.get("data", {})
+                    if not post_data or post_data.get("stickied"):
+                        continue
+
+                    post_id = str(post_data.get("id") or "")
+                    if not post_id:
+                        continue
+
+                    title = str(post_data.get("title") or "")
+                    body = str(post_data.get("selftext") or "")
+                    permalink = str(post_data.get("permalink") or "")
+                    fallback_url = str(post_data.get("url") or "")
+                    url = f"https://www.reddit.com{permalink}" if permalink else fallback_url
+                    if not url:
+                        continue
+
+                    created_utc_value = float(post_data.get("created_utc") or 0)
+                    created_utc = (
+                        datetime.fromtimestamp(created_utc_value, tz=timezone.utc)
+                        if created_utc_value > 0
+                        else datetime.now(tz=timezone.utc)
+                    )
+
+                    score = int(post_data.get("score") or 0)
+                    num_comments = int(post_data.get("num_comments") or 0)
+
+                    candidate = CandidatePost(
+                        id=post_id,
+                        title=title,
+                        body=body,
+                        subreddit=str(post_data.get("subreddit") or subreddit_name),
+                        url=url,
+                        author=str(post_data.get("author") or "unknown"),
+                        created_utc=created_utc,
+                        score=score,
+                        num_comments=num_comments,
+                    )
+
+                    relevance = self._score_keyword_match(
+                        title=title,
+                        body=body,
+                        keyword=keyword,
+                        score=score,
+                        num_comments=num_comments,
+                    )
+
+                    existing = collected.get(post_id)
+                    if existing is None or relevance > existing[1]:
+                        collected[post_id] = (candidate, relevance)
+
+                    if len(collected) >= max_candidates:
+                        break
+
+                if len(collected) >= max_candidates:
+                    break
+
+            if len(collected) >= max_candidates:
+                break
+
+        ranked = sorted(
+            collected.values(),
+            key=lambda item: (item[1], item[0].num_comments, item[0].score, item[0].created_utc),
+            reverse=True,
+        )
+
+        return [item[0] for item in ranked[:max_candidates]]
+
+    def _fetch_public_search_listing(
+        self,
+        subreddit_name: str,
+        keyword: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        encoded_keyword = urllib.parse.quote(keyword)
+        url = (
+            f"https://www.reddit.com/r/{subreddit_name}/search.json"
+            f"?q={encoded_keyword}&restrict_sr=1&sort=new&t=month&limit={limit}"
+        )
+
+        user_agent = self.user_agent or "f1bot-local"
+        request = urllib.request.Request(url, headers={"User-Agent": user_agent})
+
+        try:
+            with urllib.request.urlopen(request, timeout=20) as response:
+                payload = json.loads(response.read().decode("utf-8", errors="replace"))
+        except Exception:
+            return []
+
+        return payload.get("data", {}).get("children", [])
+
+    def _score_keyword_match(
+        self,
+        title: str,
+        body: str,
+        keyword: str,
+        score: int,
+        num_comments: int,
+    ) -> float:
+        normalized_keyword = keyword.strip().lower()
+        content = f"{title} {body}".lower()
+
+        token_hits = sum(
+            1 for token in normalized_keyword.split() if token and token in content
+        )
+        phrase_hit = 1 if normalized_keyword and normalized_keyword in content else 0
+
+        return (
+            token_hits
+            + (2 * phrase_hit)
+            + (min(num_comments, 60) * 0.04)
+            + (min(score, 120) * 0.015)
+        )
 
     def _has_credentials(self) -> bool:
         return bool(self.client_id and self.client_secret and self.user_agent)
