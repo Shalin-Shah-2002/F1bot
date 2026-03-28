@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -42,3 +43,84 @@ class LeadScanResponse(BaseModel):
     leads: list[LeadInsight]
     total_candidates: int
     used_ai: bool
+
+
+LeadStatus = Literal["new", "contacted", "qualified", "ignored"]
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=3)
+
+
+class LoginResponse(BaseModel):
+    user_id: str
+    email: str
+    access_token: str
+    token_type: str = "bearer"
+
+
+class RegisterRequest(BaseModel):
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=6)
+    full_name: str | None = Field(default=None, max_length=120)
+
+
+class RegisterResponse(BaseModel):
+    user_id: str
+    email: str
+    access_token: str
+    token_type: str = "bearer"
+
+
+class BusinessProfile(BaseModel):
+    user_id: str
+    business_description: str = Field(min_length=10, max_length=2000)
+    keywords: list[str] = Field(default_factory=list)
+    subreddits: list[str] = Field(default_factory=list)
+    updated_at: datetime | None = None
+
+    @field_validator("keywords", "subreddits", mode="before")
+    @classmethod
+    def normalize_profile_list(cls, value: list[str] | str | None) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return [str(item).strip() for item in value if str(item).strip()]
+
+
+class BusinessProfileUpsertRequest(BaseModel):
+    business_description: str = Field(min_length=10, max_length=2000)
+    keywords: list[str] = Field(default_factory=list)
+    subreddits: list[str] = Field(default_factory=list)
+
+    @field_validator("keywords", "subreddits", mode="before")
+    @classmethod
+    def normalize_profile_list(cls, value: list[str] | str | None) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return [str(item).strip() for item in value if str(item).strip()]
+
+
+class LeadRecord(BaseModel):
+    id: str
+    user_id: str
+    status: LeadStatus = "new"
+    post: CandidatePost
+    lead_score: float = Field(ge=0, le=100)
+    qualification_reason: str
+    suggested_outreach: str
+    scan_id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class LeadListResponse(BaseModel):
+    leads: list[LeadRecord]
+
+
+class LeadStatusUpdateRequest(BaseModel):
+    status: LeadStatus

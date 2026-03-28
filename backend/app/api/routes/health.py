@@ -1,12 +1,13 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.api.dependencies import get_authenticated_user_id
 from app.core.config import get_settings
 
 router = APIRouter(prefix="/api/health", tags=["health"])
 
 
 @router.get("")
-async def health_check() -> dict[str, object]:
+async def health_check(_: str = Depends(get_authenticated_user_id)) -> dict[str, object]:
     settings = get_settings()
     return {
         "status": "ok",

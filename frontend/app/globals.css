@@ -2,9 +2,111 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --brand-navy: #124e78;
+  --brand-cream: #f0f0c9;
+  --brand-gold: #f2bb05;
+  --brand-orange: #d74e09;
+  --brand-burgundy: #6e0e0a;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
-  background: #f8fafc;
-  color: #0f172a;
+  overflow-x: hidden;
+  background:
+    radial-gradient(circle at 16% 12%, rgba(242, 187, 5, 0.22) 0, transparent 40%),
+    radial-gradient(circle at 85% 0, rgba(18, 78, 120, 0.24) 0, transparent 45%),
+    radial-gradient(circle at 92% 80%, rgba(215, 78, 9, 0.16) 0, transparent 38%),
+    var(--brand-cream);
+  color: var(--brand-navy);
+}
+
+.aurora-grid {
+  position: relative;
+}
+
+.aurora-grid::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(18, 78, 120, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(18, 78, 120, 0.05) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(circle at center, black 55%, transparent 95%);
+  z-index: -2;
+}
+
+.float-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(6px);
+  opacity: 0.45;
+  animation: drift 12s ease-in-out infinite;
+}
+
+.float-orb.orb-a {
+  top: 4rem;
+  left: -3rem;
+  width: 14rem;
+  height: 14rem;
+  background: radial-gradient(circle at 30% 30%, rgba(242, 187, 5, 0.8), rgba(215, 78, 9, 0.2));
+}
+
+.float-orb.orb-b {
+  right: -2rem;
+  top: 18rem;
+  width: 12rem;
+  height: 12rem;
+  background: radial-gradient(circle at 30% 30%, rgba(18, 78, 120, 0.8), rgba(110, 14, 10, 0.2));
+  animation-delay: 2s;
+}
+
+.glass-panel {
+  border-radius: 1.25rem;
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.62));
+  border: 1px solid rgba(18, 78, 120, 0.2);
+  box-shadow: 0 18px 40px rgba(18, 78, 120, 0.14);
+  backdrop-filter: blur(10px);
+}
+
+.brand-input {
+  border-radius: 0.75rem;
+  border: 1px solid rgba(18, 78, 120, 0.3);
+  background: rgba(255, 255, 255, 0.92);
+  padding: 0.75rem 0.875rem;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.brand-input:focus {
+  border-color: var(--brand-gold);
+  outline: none;
+  box-shadow: 0 0 0 4px rgba(242, 187, 5, 0.2);
+}
+
+.brand-btn-primary {
+  border-radius: 0.75rem;
+  background: linear-gradient(135deg, var(--brand-orange), var(--brand-burgundy));
+  color: var(--brand-cream);
+  font-weight: 700;
+  transition: transform 120ms ease, filter 120ms ease;
+}
+
+.brand-btn-primary:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.03);
+}
+
+@keyframes drift {
+  0% {
+    transform: translateY(0) translateX(0);
+  }
+  50% {
+    transform: translateY(-14px) translateX(8px);
+  }
+  100% {
+    transform: translateY(0) translateX(0);
+  }
 }

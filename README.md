@@ -64,3 +64,4 @@ Frontend runs at `http://localhost:3000`.
 
 - Feature scope and build order: `docs/FEATURES.md`
 - Competitor feature intelligence: `docs/COMPETITOR_FEATURES.md`
+- Feature comparison matrix: `docs/FEATURE_COMPARISON.md`

@@ -1,36 +1,79 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import PlainTextResponse
 
-from app.core.config import get_settings
-from app.models.schemas import LeadScanRequest, LeadScanResponse
-from app.services.gemini_service import GeminiLeadScorer
-from app.services.reddit_service import RedditLeadCollector
+from app.api.dependencies import get_authenticated_user_id
+from app.controllers.leads_controller import LeadsController
+from app.core.supabase_client import get_supabase_client
+from app.models.schemas import (
+    LeadListResponse,
+    LeadRecord,
+    LeadScanRequest,
+    LeadScanResponse,
+    LeadStatus,
+    LeadStatusUpdateRequest,
+)
+from app.repositories.leads_repository import LeadsRepository
 
 router = APIRouter(prefix="/api/leads", tags=["leads"])
 
 
+def _build_controller() -> LeadsController:
+    repository = LeadsRepository(client=get_supabase_client())
+    return LeadsController(repository=repository)
+
+
 @router.post("/scan", response_model=LeadScanResponse)
-async def scan_leads(payload: LeadScanRequest) -> LeadScanResponse:
-    settings = get_settings()
-
-    collector = RedditLeadCollector(
-        client_id=settings.reddit_client_id,
-        client_secret=settings.reddit_client_secret,
-        user_agent=settings.reddit_user_agent
-    )
-    scorer = GeminiLeadScorer(
-        api_key=settings.gemini_api_key,
-        model_lite=settings.gemini_model_lite,
-        model_main=settings.gemini_model_main
-    )
-
+async def scan_leads(
+    payload: LeadScanRequest,
+    current_user_id: str = Depends(get_authenticated_user_id),
+) -> LeadScanResponse:
+    controller = _build_controller()
     try:
-        candidate_posts = await collector.fetch_candidate_posts(payload)
-        lead_insights = await scorer.score_posts(payload, candidate_posts)
-
-        return LeadScanResponse(
-            leads=lead_insights[: payload.limit],
-            total_candidates=len(candidate_posts),
-            used_ai=bool(settings.gemini_api_key)
-        )
+        return await controller.scan(user_id=current_user_id, payload=payload)
     except Exception as error:
         raise HTTPException(status_code=500, detail=f"Failed to scan leads: {error}") from error
+
+
+@router.get("", response_model=LeadListResponse)
+async def list_leads(
+    status: LeadStatus | None = Query(default=None),
+    current_user_id: str = Depends(get_authenticated_user_id),
+) -> LeadListResponse:
+    controller = _build_controller()
+    return controller.list_leads(user_id=current_user_id, status=status)
+
+
+@router.get("/export.csv", response_class=PlainTextResponse)
+async def export_leads_csv(
+    status: LeadStatus | None = Query(default=None),
+    current_user_id: str = Depends(get_authenticated_user_id),
+) -> PlainTextResponse:
+    controller = _build_controller()
+    csv_content = controller.export_csv(user_id=current_user_id, status=status)
+    return PlainTextResponse(
+        csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=leads.csv"},
+    )
+
+
+@router.get("/{lead_id}", response_model=LeadRecord)
+async def get_lead(lead_id: str, current_user_id: str = Depends(get_authenticated_user_id)) -> LeadRecord:
+    controller = _build_controller()
+    lead = controller.get_lead(user_id=current_user_id, lead_id=lead_id)
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return lead
+
+
+@router.patch("/{lead_id}/status", response_model=LeadRecord)
+async def update_lead_status(
+    lead_id: str,
+    payload: LeadStatusUpdateRequest,
+    current_user_id: str = Depends(get_authenticated_user_id),
+) -> LeadRecord:
+    controller = _build_controller()
+    lead = controller.update_status(user_id=current_user_id, lead_id=lead_id, status=payload.status)
+    if lead is None:
+        raise HTTPException(status_code=404, detail="Lead not found")
+    return lead
