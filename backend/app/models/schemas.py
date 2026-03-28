@@ -4,6 +4,22 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator
 
 
+def _normalize_string_list(value: list[str] | str | None) -> list[str]:
+    if value is None:
+        return []
+
+    raw_items = [value] if isinstance(value, str) else [str(item) for item in value]
+
+    normalized: list[str] = []
+    for raw in raw_items:
+        for part in str(raw).split(","):
+            item = part.strip()
+            if item:
+                normalized.append(item)
+
+    return normalized
+
+
 class CandidatePost(BaseModel):
     id: str
     title: str
@@ -32,11 +48,7 @@ class LeadScanRequest(BaseModel):
     @field_validator("keywords", "subreddits", mode="before")
     @classmethod
     def normalize_list(cls, value: list[str] | str | None) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
-        return [str(item).strip() for item in value if str(item).strip()]
+        return _normalize_string_list(value)
 
 
 class LeadScanResponse(BaseModel):
@@ -83,11 +95,7 @@ class BusinessProfile(BaseModel):
     @field_validator("keywords", "subreddits", mode="before")
     @classmethod
     def normalize_profile_list(cls, value: list[str] | str | None) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
-        return [str(item).strip() for item in value if str(item).strip()]
+        return _normalize_string_list(value)
 
 
 class BusinessProfileUpsertRequest(BaseModel):
@@ -98,11 +106,7 @@ class BusinessProfileUpsertRequest(BaseModel):
     @field_validator("keywords", "subreddits", mode="before")
     @classmethod
     def normalize_profile_list(cls, value: list[str] | str | None) -> list[str]:
-        if value is None:
-            return []
-        if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
-        return [str(item).strip() for item in value if str(item).strip()]
+        return _normalize_string_list(value)
 
 
 class LeadRecord(BaseModel):
