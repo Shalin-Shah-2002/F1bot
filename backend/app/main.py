@@ -1,3 +1,6 @@
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -7,10 +10,32 @@ from app.api.routes.leads import router as leads_router
 from app.api.routes.profile import router as profile_router
 from app.api.routes.settings import router as settings_router
 from app.core.config import get_settings
+from app.core.supabase_client import get_supabase_client
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
-app = FastAPI(title=settings.app_name)
+
+def _validate_startup_configuration() -> None:
+    runtime_settings = get_settings()
+    runtime_settings.validate_auth_configuration()
+
+    if runtime_settings.use_supabase_auth() and get_supabase_client() is None:
+        raise RuntimeError(
+            "Supabase auth is enabled but the Supabase client failed to initialize. "
+            "Check SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY and dependencies."
+        )
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    _validate_startup_configuration()
+    logger.info("Startup configuration validation passed")
+    yield
+
+
+app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

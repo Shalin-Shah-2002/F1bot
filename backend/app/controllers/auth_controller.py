@@ -1,10 +1,19 @@
+import logging
+
 from fastapi import HTTPException
 from typing import Any
 
 from app.core.config import get_settings
+from app.core.constants import (
+    DEMO_TOKEN_PREFIX,
+    ERROR_AUTH_CONFIGURATION,
+    ERROR_LOGIN_FAILED,
+    ERROR_REGISTRATION_FAILED,
+)
 from app.models.schemas import LoginRequest, LoginResponse, RegisterRequest, RegisterResponse
 
 SupabaseClient = Any
+logger = logging.getLogger(__name__)
 
 
 class AuthController:
@@ -17,17 +26,16 @@ class AuthController:
             return False
 
         has_supabase_config = bool(settings.supabase_url and settings.supabase_service_role_key)
+        if not has_supabase_config:
+            raise HTTPException(status_code=500, detail=ERROR_AUTH_CONFIGURATION)
 
-        if has_supabase_config and self.client is None:
+        if self.client is None:
             raise HTTPException(
                 status_code=500,
-                detail=(
-                    "Supabase is configured but auth client could not initialize. "
-                    "Check backend dependencies and restart the API."
-                ),
+                detail=ERROR_AUTH_CONFIGURATION,
             )
 
-        return has_supabase_config and self.client is not None
+        return True
 
     def login(self, payload: LoginRequest) -> LoginResponse:
         sanitized_email = payload.email.strip().lower()
@@ -49,11 +57,12 @@ class AuthController:
                 raise
             except Exception as error:
                 status_code = int(getattr(error, "status", 401) or 401)
-                raise HTTPException(status_code=status_code, detail=f"Supabase login failed: {error}") from error
+                logger.warning("Supabase login failed: %s", error)
+                raise HTTPException(status_code=status_code, detail=ERROR_LOGIN_FAILED) from error
 
         # Fallback auth flow for local scaffolding when Supabase is not configured.
         user_id = sanitized_email.replace("@", "-").replace(".", "-")
-        token = f"demo-token-{user_id}"
+        token = f"{DEMO_TOKEN_PREFIX}{user_id}"
 
         return LoginResponse(user_id=user_id, email=sanitized_email, access_token=token)
 
@@ -87,10 +96,11 @@ class AuthController:
                 raise
             except Exception as error:
                 status_code = int(getattr(error, "status", 400) or 400)
-                raise HTTPException(status_code=status_code, detail=f"Supabase registration failed: {error}") from error
+                logger.warning("Supabase registration failed: %s", error)
+                raise HTTPException(status_code=status_code, detail=ERROR_REGISTRATION_FAILED) from error
 
         # Fallback auth flow for local scaffolding when Supabase is not configured.
         user_id = sanitized_email.replace("@", "-").replace(".", "-")
-        token = f"demo-token-{user_id}"
+        token = f"{DEMO_TOKEN_PREFIX}{user_id}"
 
         return RegisterResponse(user_id=user_id, email=sanitized_email, access_token=token)

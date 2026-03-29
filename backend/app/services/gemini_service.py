@@ -1,8 +1,22 @@
+import asyncio
 import json
 import re
 from datetime import datetime, timezone
 from typing import Any
 
+from app.core.constants import (
+    AI_SCORE_WEIGHT,
+    HEURISTIC_SCORE_WEIGHT,
+    LEAD_SCAN_AI_CANDIDATE_MULTIPLIER,
+    LEAD_SCAN_MAX_AI_CANDIDATES,
+    LEAD_SCAN_MIN_AI_CANDIDATES,
+    NON_REFINED_MAX_SCORE,
+    PROMPT_MAX_BUSINESS_CHARS,
+    PROMPT_MAX_KEYWORD_CHARS,
+    PROMPT_MAX_KEYWORDS,
+    PROMPT_MAX_SNIPPET_CHARS,
+    PROMPT_MAX_TITLE_CHARS,
+)
 from app.models.schemas import CandidatePost, LeadInsight, LeadScanRequest
 
 try:
@@ -12,10 +26,15 @@ except Exception:
 
 
 class GeminiLeadScorer:
-    def __init__(self, api_key: str | None, model_lite: str, model_main: str) -> None:
+    def __init__(self, api_key: str | None, model_lite: str) -> None:
         self.api_key = api_key
         self.model_lite = model_lite
-        self.model_main = model_main
+        self.client = None
+        if self.api_key and genai is not None:
+            try:
+                self.client = genai.Client(api_key=self.api_key)
+            except Exception:
+                self.client = None
 
     async def score_posts(self, request: LeadScanRequest, posts: list[CandidatePost]) -> list[LeadInsight]:
         if not posts:
@@ -23,85 +42,69 @@ class GeminiLeadScorer:
 
         heuristic = self._heuristic_rank(request, posts)
 
-        if not self.api_key or genai is None:
+        if self.client is None:
             return heuristic[: request.limit]
 
-        refined = self._score_with_gemini(request, posts, heuristic)
-        return (refined or heuristic)[: request.limit]
+        refined = await self._score_with_flash_lite(request, heuristic)
+        ranked = self._merge_rankings(heuristic, refined)
+        return ranked[: request.limit]
 
-    def _score_with_gemini(
+    async def _score_with_flash_lite(
         self,
         request: LeadScanRequest,
-        posts: list[CandidatePost],
         heuristic: list[LeadInsight]
     ) -> list[LeadInsight]:
-        post_lookup = {post.id: post for post in posts}
-        heuristic_lookup = {item.post.id: item for item in heuristic}
+        candidate_count = min(
+            max(request.limit * LEAD_SCAN_AI_CANDIDATE_MULTIPLIER, LEAD_SCAN_MIN_AI_CANDIDATES),
+            len(heuristic),
+            LEAD_SCAN_MAX_AI_CANDIDATES,
+        )
+        candidates = heuristic[:candidate_count]
 
-        lite_candidates = [
+        post_lookup = {item.post.id: item.post for item in candidates}
+        baseline_lookup = {item.post.id: item.lead_score for item in candidates}
+        refined_ids: set[str] = set()
+
+        payload = [
             {
-                "post_id": post.id,
-                "title": post.title,
-                "body": post.body[:400],
-                "subreddit": post.subreddit,
-                "score": post.score,
-                "num_comments": post.num_comments
+                "post_id": item.post.id,
+                "title": self._compact(item.post.title, PROMPT_MAX_TITLE_CHARS),
+                "snippet": self._compact(item.post.body, PROMPT_MAX_SNIPPET_CHARS),
+                "subreddit": item.post.subreddit,
+                "upvotes": item.post.score,
+                "comments": item.post.num_comments,
+                "baseline_score": round(item.lead_score, 2),
             }
-            for post in posts
+            for item in candidates
         ]
 
-        lite_prompt = (
-            "You are selecting high-intent leads from Reddit posts. "
-            "Return only a JSON array with objects: {post_id, why}. "
-            "Select posts likely showing pain, intent, or tool buying behavior.\n\n"
-            f"Business:\n{request.business_description}\n\n"
-            f"Keywords: {', '.join(request.keywords)}\n\n"
-            f"Posts:\n{json.dumps(lite_candidates, ensure_ascii=False)}"
+        keywords = [
+            self._compact(keyword, PROMPT_MAX_KEYWORD_CHARS)
+            for keyword in request.keywords
+            if keyword.strip()
+        ][:PROMPT_MAX_KEYWORDS]
+        compact_business = self._compact(request.business_description, PROMPT_MAX_BUSINESS_CHARS)
+
+        prompt = (
+            "You are an expert B2B lead qualifier for outbound outreach. "
+            "Score each Reddit post for fit with the business below.\n"
+            "Return ONLY a JSON array sorted by lead_score descending. No markdown, no explanation text.\n"
+            "Each row schema: {post_id, lead_score, qualification_reason, suggested_outreach}.\n"
+            "Scoring rubric: ICP fit 40, explicit pain/intent 30, urgency 15, engagement signal 15.\n"
+            "qualification_reason: <= 160 chars and specific.\n"
+            "suggested_outreach: <= 220 chars, actionable, personalized, no hype.\n"
+            f"Business: {compact_business}\n"
+            f"Keywords: {', '.join(keywords) if keywords else 'n/a'}\n"
+            f"Posts: {json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
         )
 
-        lite_response = self._generate_json(self.model_lite, lite_prompt)
-        selected_ids = []
-
-        if isinstance(lite_response, list):
-            for item in lite_response:
-                if isinstance(item, dict) and str(item.get("post_id", "")).strip():
-                    selected_ids.append(str(item["post_id"]))
-
-        if not selected_ids:
-            selected_ids = [item.post.id for item in heuristic[: min(15, len(heuristic))]]
-
-        selected_posts = [post_lookup[post_id] for post_id in selected_ids if post_id in post_lookup]
-        if not selected_posts:
-            return heuristic
-
-        flash_payload = [
-            {
-                "post_id": post.id,
-                "title": post.title,
-                "body": post.body[:700],
-                "subreddit": post.subreddit,
-                "score": post.score,
-                "num_comments": post.num_comments,
-                "baseline_score": heuristic_lookup[post.id].lead_score if post.id in heuristic_lookup else 50
-            }
-            for post in selected_posts
-        ]
-
-        flash_prompt = (
-            "You score lead quality for outreach. "
-            "Return only a JSON array. "
-            "Each object must have: post_id, lead_score (0-100), qualification_reason, suggested_outreach.\n\n"
-            f"Business:\n{request.business_description}\n\n"
-            f"Posts:\n{json.dumps(flash_payload, ensure_ascii=False)}"
-        )
-
-        flash_response = self._generate_json(self.model_main, flash_prompt)
-        if not isinstance(flash_response, list):
-            return heuristic
+        response = await self._generate_json(self.model_lite, prompt)
+        if not isinstance(response, list):
+            return []
 
         insights: list[LeadInsight] = []
 
-        for row in flash_response:
+        for row in response:
             if not isinstance(row, dict):
                 continue
 
@@ -112,7 +115,7 @@ class GeminiLeadScorer:
             try:
                 lead_score = max(0.0, min(float(row.get("lead_score", 50)), 100.0))
             except Exception:
-                lead_score = heuristic_lookup.get(post_id, heuristic[0]).lead_score
+                lead_score = baseline_lookup.get(post_id, 50.0)
 
             reason = str(row.get("qualification_reason", "Likely buyer intent based on discussion context.")).strip()
             outreach = str(
@@ -130,26 +133,70 @@ class GeminiLeadScorer:
                     suggested_outreach=outreach
                 )
             )
+            refined_ids.add(post_id)
 
-        if not insights:
-            return heuristic
+        # Blend AI and heuristic to keep scoring stable while preferring model-refined rows.
+        for item in insights:
+            baseline = baseline_lookup.get(item.post.id, item.lead_score)
+            blended = (item.lead_score * AI_SCORE_WEIGHT) + (baseline * HEURISTIC_SCORE_WEIGHT)
+            item.lead_score = round(max(0.0, min(blended, 100.0)), 2)
 
-        insights.sort(key=lambda item: item.lead_score, reverse=True)
+        insights.sort(
+            key=lambda item: (item.post.id in refined_ids, item.lead_score, item.post.num_comments),
+            reverse=True,
+        )
         return insights
 
-    def _generate_json(self, model_name: str, prompt: str) -> Any:
-        if not self.api_key or genai is None:
+    def _merge_rankings(
+        self,
+        heuristic: list[LeadInsight],
+        ai_ranked: list[LeadInsight],
+    ) -> list[LeadInsight]:
+        if not ai_ranked:
+            return heuristic
+
+        ai_ids = {item.post.id for item in ai_ranked}
+        merged: dict[str, LeadInsight] = {}
+        for item in heuristic:
+            if item.post.id in ai_ids:
+                continue
+            # Keep non-refined fallback rows below refined AI rows.
+            item.lead_score = round(min(item.lead_score, NON_REFINED_MAX_SCORE), 2)
+            merged[item.post.id] = item
+
+        for item in ai_ranked:
+            merged[item.post.id] = item
+
+        ranked = list(merged.values())
+        ranked.sort(key=lambda item: item.lead_score, reverse=True)
+        return ranked
+
+    async def _generate_json(self, model_name: str, prompt: str) -> Any:
+        if self.client is None:
+            return None
+
+        return await asyncio.to_thread(self._generate_json_sync, model_name, prompt)
+
+    def _generate_json_sync(self, model_name: str, prompt: str) -> Any:
+        if self.client is None:
             return None
 
         try:
-            client = genai.Client(api_key=self.api_key)
-            response = client.models.generate_content(model=model_name, contents=prompt)
+            response = self.client.models.generate_content(model=model_name, contents=prompt)
             text = getattr(response, "text", None)
             if not text:
                 text = str(response)
             return self._extract_json(text)
         except Exception:
             return None
+
+    def _compact(self, text: str, max_chars: int) -> str:
+        compact = re.sub(r"\s+", " ", text).strip()
+        if len(compact) <= max_chars:
+            return compact
+        if max_chars <= 3:
+            return compact[:max_chars]
+        return f"{compact[: max_chars - 3]}..."
 
     def _extract_json(self, text: str) -> Any:
         candidates = []
