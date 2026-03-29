@@ -1,20 +1,31 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { downloadLeadsCsv, type LeadStatus } from "@/lib/api";
-import { getSession } from "@/lib/session";
+import { useSessionGuard } from "@/lib/use-session-guard";
 
 const STATUS_OPTIONS: Array<LeadStatus | "all"> = ["all", "new", "contacted", "qualified", "ignored"];
 
 export default function ExportPage() {
+  const router = useRouter();
+  const { session, isCheckingSession } = useSessionGuard();
   const [status, setStatus] = useState<LeadStatus | "all">("all");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!session?.accessToken) {
+      return;
+    }
+
+    setMessage(null);
+  }, [session?.accessToken]);
+
   async function handleExport() {
-    const session = getSession();
-    if (!session) {
-      setMessage("Please login first.");
+    if (!session?.accessToken) {
+      router.replace("/login");
       return;
     }
 
@@ -37,18 +48,30 @@ export default function ExportPage() {
     }
   }
 
+  if (isCheckingSession) {
+    return <main className="mx-auto max-w-4xl px-6 py-10 text-brand-navy/75">Checking your session...</main>;
+  }
+
   return (
     <main className="mx-auto max-w-4xl px-6 py-10">
-      <h1 className="text-3xl font-semibold text-brand-burgundy">Export Leads</h1>
-      <p className="mt-2 text-sm text-brand-navy/75">Download current lead data as CSV.</p>
+      <header className="brand-card relative overflow-hidden p-6 md:p-7">
+        <div className="pointer-events-none absolute -right-8 -top-2 h-28 w-28 rounded-full bg-brand-gold/28 blur-2xl" />
+        <div className="pointer-events-none absolute -left-8 bottom-0 h-24 w-24 rounded-full bg-brand-orange/24 blur-2xl" />
 
-      <section className="mt-6 rounded-xl bg-white/80 p-6 shadow-md ring-1 ring-brand-navy/20">
+        <p className="relative text-xs tracking-[0.24em] text-brand-burgundy/80">EXPORT</p>
+        <h1 className="relative mt-1 text-3xl font-semibold text-brand-burgundy" style={{ fontFamily: "var(--font-fraunces)" }}>
+          Export Leads As CSV
+        </h1>
+        <p className="relative mt-2 text-sm text-brand-navy/75">Download your pipeline data with status filtering for reporting and outreach.</p>
+      </header>
+
+      <section className="brand-card mt-6 p-6 md:p-7">
         <div className="flex flex-wrap items-center gap-3">
           <label className="text-sm font-medium text-brand-burgundy">Status filter</label>
           <select
             value={status}
             onChange={(event) => setStatus(event.target.value as LeadStatus | "all")}
-            className="rounded-md border border-brand-navy/25 bg-white px-3 py-2 text-sm text-brand-navy focus:border-brand-gold focus:outline-none"
+            className="brand-select text-sm"
           >
             {STATUS_OPTIONS.map((item) => (
               <option key={item} value={item}>
@@ -61,7 +84,7 @@ export default function ExportPage() {
             type="button"
             onClick={handleExport}
             disabled={loading}
-            className="rounded-md bg-brand-orange px-4 py-2 text-sm font-medium text-brand-cream hover:bg-brand-burgundy disabled:opacity-50"
+            className="brand-btn-primary px-4 py-2.5 text-sm disabled:opacity-50"
           >
             {loading ? "Exporting..." : "Download CSV"}
           </button>

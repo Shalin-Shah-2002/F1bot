@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getProfile, saveProfile } from "@/lib/api";
-import { getSession } from "@/lib/session";
+import { useSessionGuard } from "@/lib/use-session-guard";
 
 const DEFAULT_DESCRIPTION = "We help founders identify high-intent Reddit conversations and convert them to sales opportunities.";
 const DEFAULT_KEYWORDS = "need help,looking for,recommend,best tool";
@@ -11,17 +11,15 @@ const DEFAULT_SUBREDDITS = "entrepreneur,smallbusiness,marketing,sales";
 
 export default function ProfilePage() {
   const router = useRouter();
+  const { session, isCheckingSession } = useSessionGuard();
   const [businessDescription, setBusinessDescription] = useState(DEFAULT_DESCRIPTION);
   const [keywords, setKeywords] = useState(DEFAULT_KEYWORDS);
   const [subreddits, setSubreddits] = useState(DEFAULT_SUBREDDITS);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string | null>(null);
-  const session = getSession();
-  const hasSession = Boolean(session?.accessToken);
 
   useEffect(() => {
-    if (!hasSession) {
-      router.push("/login");
+    if (!session?.accessToken) {
       return;
     }
 
@@ -37,13 +35,31 @@ export default function ProfilePage() {
     }
 
     loadProfile();
-  }, [hasSession, router]);
+  }, [session?.accessToken]);
 
   const canSave = useMemo(() => businessDescription.trim().length >= 10 && !loading, [businessDescription, loading]);
 
+  const keywordCount = useMemo(
+    () =>
+      keywords
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean).length,
+    [keywords]
+  );
+
+  const subredditCount = useMemo(
+    () =>
+      subreddits
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean).length,
+    [subreddits]
+  );
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!hasSession) {
+    if (!session?.accessToken) {
       return;
     }
 
@@ -64,18 +80,47 @@ export default function ProfilePage() {
     }
   }
 
-  return (
-    <main className="mx-auto max-w-4xl px-6 py-10">
-      <h1 className="text-3xl font-semibold text-brand-burgundy">Business Profile</h1>
-      <p className="mt-2 text-brand-navy/75">This context is used to qualify Reddit posts.</p>
+  if (isCheckingSession) {
+    return <main className="mx-auto max-w-4xl px-6 py-10 text-brand-navy/75">Checking your session...</main>;
+  }
 
-      <form className="mt-6 grid gap-4 rounded-xl bg-white/80 p-6 shadow-md ring-1 ring-brand-navy/20" onSubmit={handleSubmit}>
+  return (
+    <main className="mx-auto max-w-5xl px-6 py-10">
+      <header className="brand-card relative overflow-hidden p-6 md:p-8">
+        <div className="pointer-events-none absolute -left-8 top-0 h-28 w-28 rounded-full bg-brand-gold/30 blur-2xl" />
+        <div className="pointer-events-none absolute bottom-0 right-0 h-32 w-32 rounded-full bg-brand-orange/26 blur-2xl" />
+
+        <p className="relative text-xs tracking-[0.24em] text-brand-burgundy/80">PROFILE SETUP</p>
+        <h1 className="relative mt-2 text-3xl font-semibold text-brand-burgundy md:text-4xl" style={{ fontFamily: "var(--font-fraunces)" }}>
+          Describe Your Buyer Context
+        </h1>
+        <p className="relative mt-3 max-w-2xl text-sm text-brand-navy/80 md:text-base">
+          This profile is sent to the backend scanner so Reddit posts can be scored against your ideal customer profile.
+        </p>
+
+        <div className="relative mt-5 grid gap-3 sm:grid-cols-3">
+          <div className="brand-stat">
+            <p className="text-xs uppercase tracking-[0.14em] text-brand-burgundy/70">Keywords</p>
+            <p className="mt-1 text-lg font-semibold text-brand-navy">{keywordCount}</p>
+          </div>
+          <div className="brand-stat">
+            <p className="text-xs uppercase tracking-[0.14em] text-brand-burgundy/70">Subreddits</p>
+            <p className="mt-1 text-lg font-semibold text-brand-navy">{subredditCount}</p>
+          </div>
+          <div className="brand-stat">
+            <p className="text-xs uppercase tracking-[0.14em] text-brand-burgundy/70">Profile Owner</p>
+            <p className="mt-1 truncate text-sm font-semibold text-brand-navy">{session?.email ?? "Unknown"}</p>
+          </div>
+        </div>
+      </header>
+
+      <form className="brand-card mt-6 grid gap-5 p-6 md:p-7" onSubmit={handleSubmit}>
         <label className="grid gap-2">
           <span className="text-sm font-medium text-brand-burgundy">Business Description</span>
           <textarea
             value={businessDescription}
             onChange={(event) => setBusinessDescription(event.target.value)}
-            className="h-32 rounded-md border border-brand-navy/30 bg-white p-3 focus:border-brand-gold focus:outline-none"
+            className="brand-input h-36 resize-y"
             required
           />
         </label>
@@ -86,7 +131,8 @@ export default function ProfilePage() {
             <input
               value={keywords}
               onChange={(event) => setKeywords(event.target.value)}
-              className="rounded-md border border-brand-navy/30 bg-white p-3 focus:border-brand-gold focus:outline-none"
+              className="brand-input"
+              placeholder="need help, looking for, recommendation"
             />
           </label>
 
@@ -95,27 +141,32 @@ export default function ProfilePage() {
             <input
               value={subreddits}
               onChange={(event) => setSubreddits(event.target.value)}
-              className="rounded-md border border-brand-navy/30 bg-white p-3 focus:border-brand-gold focus:outline-none"
+              className="brand-input"
+              placeholder="entrepreneur, smallbusiness, marketing"
             />
           </label>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3 pt-1">
           <button
             type="submit"
             disabled={!canSave}
-            className="rounded-md bg-brand-orange px-4 py-2 font-medium text-brand-cream transition-colors hover:bg-brand-burgundy disabled:opacity-50"
+            className="brand-btn-primary px-4 py-2.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
           >
             {loading ? "Saving..." : "Save Profile"}
           </button>
           <button
             type="button"
             onClick={() => router.push("/scan")}
-            className="rounded-md bg-brand-navy px-4 py-2 font-medium text-brand-cream hover:bg-brand-burgundy"
+            className="brand-btn-secondary px-4 py-2.5 text-sm"
           >
             Continue To Scan
           </button>
-          {status ? <span className="text-sm text-brand-navy/80">{status}</span> : null}
+          {status ? (
+            <span className={`text-sm ${status.toLowerCase().includes("failed") ? "text-brand-burgundy" : "text-brand-navy/80"}`}>
+              {status}
+            </span>
+          ) : null}
         </div>
       </form>
     </main>

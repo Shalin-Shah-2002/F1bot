@@ -11,6 +11,17 @@ It helps teams:
 
 The repo includes a FastAPI backend and a Next.js frontend dashboard.
 
+## UI Preview
+
+### Landing page
+![F1bot landing page](frontend/Assets/image.png)
+
+### Leads and workflow view
+![F1bot workflow page](frontend/Assets/2026-03-29_21-50-42.png)
+
+### Product screen
+![F1bot product screen](frontend/Assets/2026-03-29_21-50-13.png)
+
 ## Table of Contents
 
 - [1. Project Overview](#1-project-overview)

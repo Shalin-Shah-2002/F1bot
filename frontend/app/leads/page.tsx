@@ -1,46 +1,46 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getLeads, type LeadRecord, type LeadStatus } from "@/lib/api";
-import { getSession } from "@/lib/session";
+import { useSessionGuard } from "@/lib/use-session-guard";
 
 const STATUS_OPTIONS: Array<LeadStatus | "all"> = ["all", "new", "contacted", "qualified", "ignored"];
+const INITIAL_VISIBLE_LEADS = 24;
 
 export default function LeadsPage() {
-  const router = useRouter();
-  const session = getSession();
+  const { session, isCheckingSession } = useSessionGuard();
   const [statusFilter, setStatusFilter] = useState<LeadStatus | "all">("all");
   const [leads, setLeads] = useState<LeadRecord[]>([]);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_LEADS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  async function loadLeads(nextStatus: LeadStatus | "all" = statusFilter) {
-    if (!session) {
+  const loadLeads = useCallback(async (nextStatus: LeadStatus | "all") => {
+    if (!session?.accessToken) {
       return;
     }
+
     setLoading(true);
     setError(null);
 
     try {
       const response = await getLeads(nextStatus === "all" ? undefined : nextStatus);
       setLeads(response.leads);
+      setVisibleCount(INITIAL_VISIBLE_LEADS);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Failed to load leads");
     } finally {
       setLoading(false);
     }
-  }
+  }, [session?.accessToken]);
 
   useEffect(() => {
-    if (!session) {
-      router.push("/login");
+    if (!session?.accessToken) {
       return;
     }
     loadLeads("all");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router, session]);
+  }, [loadLeads, session?.accessToken]);
 
   const totalByStatus = useMemo(() => {
     return leads.reduce(
@@ -52,39 +52,66 @@ export default function LeadsPage() {
     );
   }, [leads]);
 
+  const visibleLeads = useMemo(() => leads.slice(0, visibleCount), [leads, visibleCount]);
+
+  if (isCheckingSession) {
+    return <main className="mx-auto max-w-4xl px-6 py-10 text-brand-navy/75">Checking your session...</main>;
+  }
+
   return (
     <main className="mx-auto max-w-6xl px-6 py-10">
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="brand-card relative overflow-hidden p-6 md:p-7">
+        <div className="pointer-events-none absolute -right-10 top-0 h-32 w-32 rounded-full bg-brand-gold/25 blur-2xl" />
+        <div className="pointer-events-none absolute -left-10 bottom-0 h-28 w-28 rounded-full bg-brand-orange/24 blur-2xl" />
+
         <div>
-          <h1 className="text-3xl font-semibold text-brand-burgundy">Leads Inbox</h1>
-          <p className="mt-2 text-sm text-brand-navy/75">Review, prioritize, and update lead status.</p>
+          <p className="text-xs tracking-[0.24em] text-brand-burgundy/80">LEADS INBOX</p>
+          <h1 className="mt-1 text-3xl font-semibold text-brand-burgundy" style={{ fontFamily: "var(--font-fraunces)" }}>
+            Review And Qualify Leads
+          </h1>
+          <p className="mt-2 text-sm text-brand-navy/75">Filter by status, open full context, and keep your pipeline moving.</p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <label className="text-sm text-brand-burgundy">Status</label>
-          <select
-            value={statusFilter}
-            onChange={(event) => {
-              const next = event.target.value as LeadStatus | "all";
-              setStatusFilter(next);
-              loadLeads(next);
-            }}
-            className="rounded-md border border-brand-navy/25 bg-white px-3 py-2 text-sm text-brand-navy focus:border-brand-gold focus:outline-none"
-          >
-            {STATUS_OPTIONS.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
+        <div className="mt-4 flex flex-wrap items-end gap-3 md:mt-5">
+          <label className="grid gap-1">
+            <span className="text-xs uppercase tracking-[0.14em] text-brand-burgundy/80">Status Filter</span>
+            <select
+              value={statusFilter}
+              onChange={(event) => {
+                const next = event.target.value as LeadStatus | "all";
+                setStatusFilter(next);
+                loadLeads(next);
+              }}
+              className="brand-select min-w-40 text-sm"
+            >
+              {STATUS_OPTIONS.map((item) => (
+                <option key={item} value={item}>
+                  {item}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="brand-badge">Showing: {visibleLeads.length} / {leads.length}</span>
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2 text-sm">
-        <span className="rounded-full bg-white/70 px-3 py-1 ring-1 ring-brand-navy/15">New: {totalByStatus.new}</span>
-        <span className="rounded-full bg-white/70 px-3 py-1 ring-1 ring-brand-navy/15">Contacted: {totalByStatus.contacted}</span>
-        <span className="rounded-full bg-white/70 px-3 py-1 ring-1 ring-brand-navy/15">Qualified: {totalByStatus.qualified}</span>
-        <span className="rounded-full bg-white/70 px-3 py-1 ring-1 ring-brand-navy/15">Ignored: {totalByStatus.ignored}</span>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="brand-stat">
+          <p className="text-xs uppercase tracking-[0.14em] text-brand-burgundy/70">New</p>
+          <p className="mt-1 text-xl font-semibold text-brand-navy">{totalByStatus.new}</p>
+        </div>
+        <div className="brand-stat">
+          <p className="text-xs uppercase tracking-[0.14em] text-brand-burgundy/70">Contacted</p>
+          <p className="mt-1 text-xl font-semibold text-brand-navy">{totalByStatus.contacted}</p>
+        </div>
+        <div className="brand-stat">
+          <p className="text-xs uppercase tracking-[0.14em] text-brand-burgundy/70">Qualified</p>
+          <p className="mt-1 text-xl font-semibold text-brand-navy">{totalByStatus.qualified}</p>
+        </div>
+        <div className="brand-stat">
+          <p className="text-xs uppercase tracking-[0.14em] text-brand-burgundy/70">Ignored</p>
+          <p className="mt-1 text-xl font-semibold text-brand-navy">{totalByStatus.ignored}</p>
+        </div>
       </div>
 
       {error ? <p className="mt-4 text-sm text-brand-burgundy">{error}</p> : null}
@@ -94,11 +121,11 @@ export default function LeadsPage() {
 
         {!loading && leads.length === 0 ? <p className="text-brand-navy/70">No leads found.</p> : null}
 
-        {leads.map((lead) => (
-          <article key={lead.id} className="rounded-xl bg-white/80 p-5 shadow-md ring-1 ring-brand-navy/20">
+        {visibleLeads.map((lead) => (
+          <article key={lead.id} className="brand-card p-5">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-lg font-semibold text-brand-navy">{lead.post.title}</h2>
-              <span className="rounded-full bg-brand-gold/35 px-3 py-1 text-sm font-medium text-brand-burgundy">
+              <span className="brand-badge">
                 {lead.status.toUpperCase()} · {lead.lead_score}
               </span>
             </div>
@@ -109,7 +136,7 @@ export default function LeadsPage() {
             <div className="mt-4 flex flex-wrap items-center gap-3">
               <Link
                 href={`/leads/${lead.id}`}
-                className="rounded-md bg-brand-orange px-3 py-2 text-sm font-medium text-brand-cream hover:bg-brand-burgundy"
+                className="brand-btn-primary px-3 py-2 text-sm"
               >
                 Open Lead
               </Link>
@@ -124,6 +151,16 @@ export default function LeadsPage() {
             </div>
           </article>
         ))}
+
+        {!loading && visibleLeads.length < leads.length ? (
+          <button
+            type="button"
+            onClick={() => setVisibleCount((current) => current + INITIAL_VISIBLE_LEADS)}
+            className="brand-btn-secondary mx-auto mt-2 w-fit px-4 py-2 text-sm"
+          >
+            Show More Leads
+          </button>
+        ) : null}
       </section>
     </main>
   );

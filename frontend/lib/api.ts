@@ -1,4 +1,4 @@
-import { getSession } from "@/lib/session";
+import { clearSession, getSession } from "@/lib/session";
 
 export interface CandidatePost {
   id: string;
@@ -95,6 +95,27 @@ export interface RuntimeSettingsResponse {
   gemini_configured: boolean;
   reddit_configured: boolean;
   supabase_configured: boolean;
+  supabase_auth_enabled: boolean;
+  scan_rate_limit_per_minute: number;
+  scan_rate_limit_window_seconds: number;
+  scan_daily_quota: number;
+}
+
+export interface RuntimeHealthResponse {
+  status: string;
+  environment: string;
+  gemini_configured: boolean;
+  reddit_configured: boolean;
+}
+
+interface FastApiValidationError {
+  loc: Array<string | number>;
+  msg: string;
+  type: string;
+}
+
+interface FastApiErrorPayload {
+  detail?: string | FastApiValidationError[];
 }
 
 const processEnv =
@@ -102,7 +123,23 @@ const processEnv =
     ? (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
     : undefined;
 
-const API_BASE_URL = processEnv?.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE_URL = processEnv?.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:8000";
+
+function toHeaderObject(headers?: HeadersInit): Record<string, string> {
+  if (!headers) {
+    return {};
+  }
+
+  if (headers instanceof Headers) {
+    return Object.fromEntries(headers.entries());
+  }
+
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+
+  return { ...headers };
+}
 
 function getAuthorizationHeader(): Record<string, string> {
   const session = getSession();
@@ -116,34 +153,106 @@ function getAuthorizationHeader(): Record<string, string> {
   };
 }
 
+function formatValidationErrors(errors: FastApiValidationError[]): string {
+  const messages = errors
+    .map((entry) => {
+      const field = entry.loc
+        .map((value) => String(value))
+        .filter((value) => value !== "body" && value !== "query" && value !== "path")
+        .join(".");
+
+      return field ? `${field}: ${entry.msg}` : entry.msg;
+    })
+    .filter(Boolean);
+
+  return messages.length > 0 ? messages.join("; ") : "Request validation failed";
+}
+
+async function parseErrorResponse(response: Response): Promise<string> {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    try {
+      const payload = (await response.json()) as FastApiErrorPayload;
+      if (typeof payload.detail === "string" && payload.detail.trim().length > 0) {
+        return payload.detail;
+      }
+      if (Array.isArray(payload.detail)) {
+        return formatValidationErrors(payload.detail);
+      }
+    } catch {
+      // Fallback to plain text when JSON parsing fails.
+    }
+  }
+
+  const text = await response.text();
+  return text || `Request failed with status ${response.status}`;
+}
+
+function handleUnauthorizedResponse(): never {
+  clearSession();
+  if (typeof window !== "undefined") {
+    window.location.assign("/login");
+  }
+  throw new Error("Session expired. Please log in again.");
+}
+
+async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  let response: Response;
+
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      cache: init?.cache ?? "no-store",
+      headers: {
+        Accept: "application/json",
+        ...toHeaderObject(init?.headers)
+      }
+    });
+  } catch {
+    throw new Error(`Unable to connect to API (${API_BASE_URL}).`);
+  }
+
+  return response;
+}
+
 async function authenticatedFetch(path: string, init?: RequestInit): Promise<Response> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await apiFetch(path, {
     ...init,
     headers: {
       ...getAuthorizationHeader(),
-      ...(init?.headers ?? {})
+      ...toHeaderObject(init?.headers)
     }
   });
+
+  if (response.status === 401) {
+    handleUnauthorizedResponse();
+  }
 
   return response;
 }
 
 async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    const contentType = response.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      const data = (await response.json()) as { detail?: string };
-      throw new Error(data.detail || "Request failed");
-    }
-
-    const text = await response.text();
-    throw new Error(text || "Request failed");
+    throw new Error(await parseErrorResponse(response));
   }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
   return (await response.json()) as T;
 }
 
+async function parseBlobResponse(response: Response): Promise<Blob> {
+  if (!response.ok) {
+    throw new Error(await parseErrorResponse(response));
+  }
+
+  return response.blob();
+}
+
 export async function login(payload: LoginRequest): Promise<LoginResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+  const response = await apiFetch("/api/auth/login", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -155,7 +264,7 @@ export async function login(payload: LoginRequest): Promise<LoginResponse> {
 }
 
 export async function register(payload: RegisterRequest): Promise<RegisterResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
+  const response = await apiFetch("/api/auth/register", {
     method: "POST",
     headers: {
       "Content-Type": "application/json"
@@ -231,6 +340,11 @@ export async function getRuntimeSettings(): Promise<RuntimeSettingsResponse> {
   return parseResponse<RuntimeSettingsResponse>(response);
 }
 
+export async function getHealth(): Promise<RuntimeHealthResponse> {
+  const response = await authenticatedFetch("/api/health");
+  return parseResponse<RuntimeHealthResponse>(response);
+}
+
 export async function downloadLeadsCsv(status?: LeadStatus): Promise<Blob> {
   const query = new URLSearchParams();
   if (status) {
@@ -238,11 +352,11 @@ export async function downloadLeadsCsv(status?: LeadStatus): Promise<Blob> {
   }
 
   const path = query.toString() ? `/api/leads/export.csv?${query.toString()}` : "/api/leads/export.csv";
-  const response = await authenticatedFetch(path);
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(text || "Failed to export leads");
-  }
+  const response = await authenticatedFetch(path, {
+    headers: {
+      Accept: "text/csv"
+    }
+  });
 
-  return response.blob();
+  return parseBlobResponse(response);
 }
