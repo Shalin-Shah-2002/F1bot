@@ -1,8 +1,12 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 
 from app.api.dependencies import get_authenticated_user_id
 from app.controllers.leads_controller import LeadsController
+from app.core.constants import ERROR_LEAD_SCAN_FAILED
+from app.core.scan_limits import enforce_scan_limits
 from app.core.supabase_client import get_supabase_client
 from app.models.schemas import (
     LeadListResponse,
@@ -15,6 +19,7 @@ from app.models.schemas import (
 from app.repositories.leads_repository import LeadsRepository
 
 router = APIRouter(prefix="/api/leads", tags=["leads"])
+logger = logging.getLogger(__name__)
 
 
 def _build_controller() -> LeadsController:
@@ -27,11 +32,15 @@ async def scan_leads(
     payload: LeadScanRequest,
     current_user_id: str = Depends(get_authenticated_user_id),
 ) -> LeadScanResponse:
+    enforce_scan_limits(current_user_id)
     controller = _build_controller()
     try:
         return await controller.scan(user_id=current_user_id, payload=payload)
+    except HTTPException:
+        raise
     except Exception as error:
-        raise HTTPException(status_code=500, detail=f"Failed to scan leads: {error}") from error
+        logger.exception("Lead scan failed for user %s: %s", current_user_id, error)
+        raise HTTPException(status_code=500, detail=ERROR_LEAD_SCAN_FAILED) from error
 
 
 @router.get("", response_model=LeadListResponse)

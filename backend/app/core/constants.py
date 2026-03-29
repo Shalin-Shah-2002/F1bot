@@ -1,0 +1,71 @@
+"""Shared constants for backend services and API handlers."""
+
+from pathlib import Path
+
+# Project paths
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+ENV_FILE_PATH = PROJECT_ROOT / ".env"
+
+# Environment variable keys
+ENV_APP_NAME = "APP_NAME"
+ENV_APP_ENV = "APP_ENV"
+ENV_FRONTEND_ORIGIN = "FRONTEND_ORIGIN"
+
+ENV_GEMINI_API_KEY = "GEMINI_API_KEY"
+ENV_GEMINI_MODEL_LITE = "GEMINI_MODEL_LITE"
+ENV_GEMINI_MODEL_MAIN = "GEMINI_MODEL_MAIN"
+
+ENV_REDDIT_CLIENT_ID = "REDDIT_CLIENT_ID"
+ENV_REDDIT_CLIENT_SECRET = "REDDIT_CLIENT_SECRET"
+ENV_REDDIT_USER_AGENT = "REDDIT_USER_AGENT"
+
+ENV_SUPABASE_URL = "SUPABASE_URL"
+ENV_SUPABASE_SERVICE_ROLE_KEY = "SUPABASE_SERVICE_ROLE_KEY"
+ENV_SUPABASE_AUTH_ENABLED = "SUPABASE_AUTH_ENABLED"
+
+ENV_SCAN_RATE_LIMIT_PER_MINUTE = "SCAN_RATE_LIMIT_PER_MINUTE"
+ENV_SCAN_RATE_LIMIT_WINDOW_SECONDS = "SCAN_RATE_LIMIT_WINDOW_SECONDS"
+ENV_SCAN_DAILY_QUOTA = "SCAN_DAILY_QUOTA"
+
+# Settings defaults (overridable via .env)
+DEFAULT_APP_NAME = "F1bot API"
+DEFAULT_APP_ENV = "development"
+DEFAULT_FRONTEND_ORIGIN = "http://localhost:3000"
+
+DEFAULT_GEMINI_MODEL_LITE = "gemini-2.5-flash-lite"
+DEFAULT_REDDIT_USER_AGENT = "f1bot-local"
+
+DEFAULT_SCAN_RATE_LIMIT_PER_MINUTE = 6
+DEFAULT_SCAN_RATE_LIMIT_WINDOW_SECONDS = 60
+DEFAULT_SCAN_DAILY_QUOTA = 200
+
+SUPABASE_AUTH_DISABLED_ENVS = ("development", "dev", "local", "test")
+
+# API-safe error messages
+ERROR_AUTH_CONFIGURATION = "Authentication service is not configured correctly."
+ERROR_AUTHENTICATION_FAILED = "Authentication failed."
+ERROR_TOKEN_INVALID = "Invalid or expired access token"
+ERROR_LOGIN_FAILED = "Login failed. Check credentials and try again."
+ERROR_REGISTRATION_FAILED = "Registration failed. Please try again."
+ERROR_LEAD_SCAN_FAILED = "Lead scan failed. Please try again."
+ERROR_SCAN_RATE_LIMIT = "Scan rate limit exceeded. Please retry later."
+ERROR_SCAN_DAILY_QUOTA = "Daily scan quota reached. Please try again tomorrow."
+
+# Local/dev auth
+DEMO_TOKEN_PREFIX = "demo-token-"
+
+# Lead scoring tunables
+LEAD_SCAN_AI_CANDIDATE_MULTIPLIER = 3
+LEAD_SCAN_MIN_AI_CANDIDATES = 8
+LEAD_SCAN_MAX_AI_CANDIDATES = 12
+
+AI_SCORE_WEIGHT = 0.7
+HEURISTIC_SCORE_WEIGHT = 0.3
+NON_REFINED_MAX_SCORE = 79.0
+
+# Prompt size controls
+PROMPT_MAX_TITLE_CHARS = 140
+PROMPT_MAX_SNIPPET_CHARS = 220
+PROMPT_MAX_KEYWORD_CHARS = 32
+PROMPT_MAX_KEYWORDS = 8
+PROMPT_MAX_BUSINESS_CHARS = 320

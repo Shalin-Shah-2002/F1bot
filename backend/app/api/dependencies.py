@@ -1,19 +1,23 @@
+import logging
+
 from fastapi import HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import get_settings
+from app.core.constants import DEMO_TOKEN_PREFIX, ERROR_AUTH_CONFIGURATION, ERROR_TOKEN_INVALID
 from app.core.supabase_client import get_supabase_client
+
+logger = logging.getLogger(__name__)
 
 
 bearer_scheme = HTTPBearer(auto_error=False, scheme_name="BearerAuth", bearerFormat="JWT")
 
 
 def _extract_local_user_id(token: str) -> str:
-    prefix = "demo-token-"
-    if not token.startswith(prefix):
+    if not token.startswith(DEMO_TOKEN_PREFIX):
         raise HTTPException(status_code=401, detail="Invalid local access token")
 
-    user_id = token[len(prefix):].strip()
+    user_id = token[len(DEMO_TOKEN_PREFIX):].strip()
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid local access token")
 
@@ -35,17 +39,11 @@ async def get_authenticated_user_id(
 
     has_supabase_config = bool(settings.supabase_url and settings.supabase_service_role_key)
     if not has_supabase_config:
-        raise HTTPException(
-            status_code=500,
-            detail="Supabase auth is enabled but SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY are missing",
-        )
+        raise HTTPException(status_code=500, detail=ERROR_AUTH_CONFIGURATION)
 
     client = get_supabase_client()
     if client is None:
-        raise HTTPException(
-            status_code=500,
-            detail="Supabase auth client failed to initialize",
-        )
+        raise HTTPException(status_code=500, detail=ERROR_AUTH_CONFIGURATION)
 
     try:
         user_response = client.auth.get_user(token)
@@ -59,7 +57,8 @@ async def get_authenticated_user_id(
     except HTTPException:
         raise
     except Exception as error:
-        raise HTTPException(status_code=401, detail=f"Token validation failed: {error}") from error
+        logger.warning("Token validation failed: %s", error)
+        raise HTTPException(status_code=401, detail=ERROR_TOKEN_INVALID) from error
 
     return user_id
 

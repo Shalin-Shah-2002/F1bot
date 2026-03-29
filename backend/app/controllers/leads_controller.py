@@ -29,7 +29,6 @@ class LeadsController:
         scorer = GeminiLeadScorer(
             api_key=settings.gemini_api_key,
             model_lite=settings.gemini_model_lite,
-            model_main=settings.gemini_model_main,
         )
 
         candidate_posts = await collector.fetch_candidate_posts(payload)

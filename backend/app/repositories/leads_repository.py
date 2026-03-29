@@ -91,22 +91,12 @@ class LeadsRepository:
             MEMORY_LEADS[lead_id] = updated
             return updated
 
-        rows = (
-            self.client.table("leads")
-            .update({"status": status, "updated_at": now.isoformat()})
-            .eq("id", lead_id)
-            .eq("user_id", user_id)
-            .select("*")
-            .limit(1)
-            .execute()
-            .data
-            or []
-        )
+        # Keep update and fetch separate for supabase-py compatibility across versions.
+        self.client.table("leads").update(
+            {"status": status, "updated_at": now.isoformat()}
+        ).eq("id", lead_id).eq("user_id", user_id).execute()
 
-        if not rows:
-            return None
-
-        return self._from_row(rows[0])
+        return self.get_lead(user_id=user_id, lead_id=lead_id)
 
     def _to_row(self, record: LeadRecord) -> dict[str, object]:
         return {
