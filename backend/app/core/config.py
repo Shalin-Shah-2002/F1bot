@@ -22,6 +22,7 @@ from app.core.constants import (
     ENV_GEMINI_API_KEY,
     ENV_GEMINI_MODEL_LITE,
     ENV_GEMINI_MODEL_MAIN,
+    ENV_LOCAL_AUTH_FALLBACK_ENABLED,
     ENV_REDDIT_CLIENT_ID,
     ENV_REDDIT_CLIENT_SECRET,
     ENV_REDDIT_USER_AGENT,
@@ -49,6 +50,10 @@ class Settings(BaseSettings):
     supabase_url: Annotated[str | None, Field(validation_alias=ENV_SUPABASE_URL)] = None
     supabase_service_role_key: Annotated[str | None, Field(validation_alias=ENV_SUPABASE_SERVICE_ROLE_KEY)] = None
     supabase_auth_enabled: Annotated[bool | None, Field(validation_alias=ENV_SUPABASE_AUTH_ENABLED)] = None
+    local_auth_fallback_enabled: Annotated[
+        bool,
+        Field(validation_alias=ENV_LOCAL_AUTH_FALLBACK_ENABLED),
+    ] = False
 
     scan_rate_limit_per_minute: Annotated[
         int,
@@ -63,11 +68,18 @@ class Settings(BaseSettings):
         Field(validation_alias=ENV_SCAN_DAILY_QUOTA, ge=1, le=10000),
     ] = DEFAULT_SCAN_DAILY_QUOTA
 
+    def is_local_environment(self) -> bool:
+        return self.app_env.lower() in SUPABASE_AUTH_DISABLED_ENVS
+
     def use_supabase_auth(self) -> bool:
         if self.supabase_auth_enabled is not None:
             return self.supabase_auth_enabled
 
-        return self.app_env.lower() not in SUPABASE_AUTH_DISABLED_ENVS
+        # Fail closed by default. Local/demo fallback requires explicit opt-in.
+        if self.local_auth_fallback_enabled and self.is_local_environment():
+            return False
+
+        return True
 
     def validate_auth_configuration(self) -> None:
         if self.use_supabase_auth():
@@ -81,10 +93,16 @@ class Settings(BaseSettings):
                 raise RuntimeError(f"{ERROR_AUTH_CONFIGURATION} Missing: {missing}")
             return
 
-        if self.app_env.lower() not in SUPABASE_AUTH_DISABLED_ENVS:
+        if not self.is_local_environment():
             raise RuntimeError(
                 "Supabase auth must be enabled outside local/dev/test environments. "
                 "Set SUPABASE_AUTH_ENABLED=true."
+            )
+
+        if not self.local_auth_fallback_enabled:
+            raise RuntimeError(
+                "Local/demo auth fallback is disabled. "
+                "Set LOCAL_AUTH_FALLBACK_ENABLED=true only for local/dev/test usage."
             )
 
     model_config = SettingsConfigDict(

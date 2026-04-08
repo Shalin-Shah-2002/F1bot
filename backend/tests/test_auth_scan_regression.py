@@ -29,6 +29,7 @@ def build_test_client(monkeypatch: pytest.MonkeyPatch, **env_overrides: str | No
     base_env: dict[str, str | None] = {
         "APP_ENV": "development",
         "SUPABASE_AUTH_ENABLED": "false",
+        "LOCAL_AUTH_FALLBACK_ENABLED": "true",
         "SUPABASE_URL": None,
         "SUPABASE_SERVICE_ROLE_KEY": None,
         "SCAN_RATE_LIMIT_PER_MINUTE": "6",
@@ -160,3 +161,31 @@ def test_startup_fails_if_auth_disabled_in_production(monkeypatch: pytest.Monkey
             SUPABASE_SERVICE_ROLE_KEY=None,
         ):
             pass
+
+
+def test_startup_fails_if_local_fallback_not_opted_in(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(RuntimeError):
+        with build_test_client(
+            monkeypatch,
+            APP_ENV="development",
+            SUPABASE_AUTH_ENABLED="false",
+            LOCAL_AUTH_FALLBACK_ENABLED="false",
+            SUPABASE_URL=None,
+            SUPABASE_SERVICE_ROLE_KEY=None,
+        ):
+            pass
+
+
+def test_settings_fail_closed_when_local_fallback_not_explicit() -> None:
+    from app.core.config import Settings
+
+    settings = Settings(
+        _env_file=None,
+        APP_ENV="development",
+        LOCAL_AUTH_FALLBACK_ENABLED="false",
+        SUPABASE_URL="",
+        SUPABASE_SERVICE_ROLE_KEY="",
+    )
+
+    with pytest.raises(RuntimeError):
+        settings.validate_auth_configuration()

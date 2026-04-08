@@ -8,12 +8,20 @@ Set these in `backend/.env`:
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 SUPABASE_AUTH_ENABLED=true
+LOCAL_AUTH_FALLBACK_ENABLED=false
 ```
 
 Keep your existing app/reddit/gemini variables as-is.
 
 If you are developing locally and want to avoid sending Supabase transactional emails,
-set `SUPABASE_AUTH_ENABLED=false` (or leave it unset while `APP_ENV=development`).
+set:
+
+```env
+SUPABASE_AUTH_ENABLED=false
+LOCAL_AUTH_FALLBACK_ENABLED=true
+```
+
+Local fallback auth no longer auto-enables from `APP_ENV` alone.
 
 ## 2) SQL Schema
 
@@ -61,4 +69,4 @@ If you enable RLS, create policies according to your auth model. Current backend
 ## 4) Auth Behavior
 
 - If Supabase is configured and `SUPABASE_AUTH_ENABLED=true`, auth routes use Supabase (`sign_in_with_password` and `sign_up`).
-- If Supabase auth is disabled (for example local development), backend falls back to demo local auth responses and does not trigger Supabase auth emails.
+- If Supabase auth is disabled and `LOCAL_AUTH_FALLBACK_ENABLED=true` in a local/dev/test environment, backend falls back to demo local auth responses and does not trigger Supabase auth emails.
