@@ -1,16 +1,23 @@
 import logging
+from dataclasses import dataclass
 
 from fastapi import HTTPException, Security
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.config import get_settings
 from app.core.constants import DEMO_TOKEN_PREFIX, ERROR_AUTH_CONFIGURATION, ERROR_TOKEN_INVALID
-from app.core.supabase_client import get_supabase_client
+from app.core.supabase_client import get_supabase_auth_client
 
 logger = logging.getLogger(__name__)
 
 
 bearer_scheme = HTTPBearer(auto_error=False, scheme_name="BearerAuth", bearerFormat="JWT")
+
+
+@dataclass(frozen=True)
+class AuthContext:
+    user_id: str
+    access_token: str
 
 
 def _extract_local_user_id(token: str) -> str:
@@ -24,9 +31,9 @@ def _extract_local_user_id(token: str) -> str:
     return user_id
 
 
-async def get_authenticated_user_id(
+async def get_authenticated_context(
     credentials: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
-) -> str:
+) -> AuthContext:
     if credentials is None or not credentials.credentials.strip():
         raise HTTPException(status_code=401, detail="Missing Authorization bearer token")
 
@@ -35,13 +42,13 @@ async def get_authenticated_user_id(
 
     if not settings.use_supabase_auth():
         # Local/dev mode maps fallback token to a stable local user id.
-        return _extract_local_user_id(token)
+        return AuthContext(user_id=_extract_local_user_id(token), access_token=token)
 
-    has_supabase_config = bool(settings.supabase_url and settings.supabase_service_role_key)
+    has_supabase_config = bool(settings.supabase_url and settings.supabase_anon_key)
     if not has_supabase_config:
         raise HTTPException(status_code=500, detail=ERROR_AUTH_CONFIGURATION)
 
-    client = get_supabase_client()
+    client = get_supabase_auth_client()
     if client is None:
         raise HTTPException(status_code=500, detail=ERROR_AUTH_CONFIGURATION)
 
@@ -60,7 +67,14 @@ async def get_authenticated_user_id(
         logger.warning("Token validation failed: %s", error)
         raise HTTPException(status_code=401, detail=ERROR_TOKEN_INVALID) from error
 
-    return user_id
+    return AuthContext(user_id=user_id, access_token=token)
+
+
+async def get_authenticated_user_id(
+    credentials: HTTPAuthorizationCredentials | None = Security(bearer_scheme),
+) -> str:
+    auth_context = await get_authenticated_context(credentials)
+    return auth_context.user_id
 
 
 async def require_authenticated_request(

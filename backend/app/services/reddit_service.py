@@ -63,8 +63,14 @@ class RedditLeadCollector:
         self.user_agent = user_agent
         self._public_search_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 
-    async def fetch_candidate_posts(self, request: LeadScanRequest) -> list[CandidatePost]:
-        max_candidates = max(request.limit * 3, 30)
+    async def fetch_candidate_posts(
+        self,
+        request: LeadScanRequest,
+        seen_post_ids: set[str] | None = None,
+    ) -> list[CandidatePost]:
+        """Fetch candidate posts, excluding any IDs in *seen_post_ids*."""
+        seen = seen_post_ids or set()
+        max_candidates = max(request.limit * 4, 50)  # fetch extra so we have room after dedup
         raw_keywords = request.keywords or self._derive_keywords(request.business_description)
         keywords = self._prepare_keywords(raw_keywords)
         subreddits = self._normalize_subreddits(request.subreddits or DEFAULT_SUBREDDITS)
@@ -74,26 +80,53 @@ class RedditLeadCollector:
         if not subreddits:
             subreddits = DEFAULT_SUBREDDITS
 
-        if self._has_credentials() and asyncpraw is not None:
-            posts = await self._fetch_with_authenticated_api(
+        # Try progressively wider time windows so repeat scans surface fresh posts.
+        time_filters = ["week", "month", "year", "all"]
+        all_posts: list[CandidatePost] = []
+
+        for time_filter in time_filters:
+            if self._has_credentials() and asyncpraw is not None:
+                posts = await self._fetch_with_authenticated_api(
+                    subreddits=subreddits,
+                    keywords=keywords,
+                    request_limit=request.limit,
+                    max_candidates=max_candidates,
+                    time_filter=time_filter,
+                )
+                if posts:
+                    new_posts = [p for p in posts if p.id not in seen]
+                    all_posts.extend(new_posts)
+                    if len(all_posts) >= request.limit:
+                        break
+                    # Not enough new results — widen the time window
+                    continue
+
+            posts = await self._fetch_with_public_search(
                 subreddits=subreddits,
                 keywords=keywords,
                 request_limit=request.limit,
                 max_candidates=max_candidates,
+                time_filter=time_filter,
             )
-            if posts:
-                return posts
+            new_posts = [p for p in posts if p.id not in seen]
+            all_posts.extend(new_posts)
+            if len(all_posts) >= request.limit:
+                break
 
-        posts = await self._fetch_with_public_search(
-            subreddits=subreddits,
-            keywords=keywords,
-            request_limit=request.limit,
-            max_candidates=max_candidates,
-        )
-        if posts:
-            return posts
+        # Remove duplicates introduced by multi-pass while preserving rank order
+        seen_ids: set[str] = set()
+        unique_posts: list[CandidatePost] = []
+        for post in all_posts:
+            if post.id not in seen_ids:
+                seen_ids.add(post.id)
+                unique_posts.append(post)
 
-        return self._sample_posts(request)
+        if unique_posts:
+            return unique_posts[:max_candidates]
+
+        # Last-resort: return sample posts that are not already seen
+        sample = self._sample_posts(request)
+        return [p for p in sample if p.id not in seen] or sample
 
     async def _fetch_with_authenticated_api(
         self,
@@ -101,6 +134,7 @@ class RedditLeadCollector:
         keywords: list[str],
         request_limit: int,
         max_candidates: int,
+        time_filter: str = "month",
     ) -> list[CandidatePost]:
         if not self._has_credentials() or asyncpraw is None:
             return []
@@ -122,8 +156,8 @@ class RedditLeadCollector:
                 for keyword in keywords:
                     async for submission in subreddit.search(
                         keyword,
-                        sort="relevance",
-                        time_filter="month",
+                        sort="new",          # "new" surfaces recent & varied posts
+                        time_filter=time_filter,
                         limit=per_query_limit,
                     ):
                         if getattr(submission, "stickied", False):
@@ -184,6 +218,7 @@ class RedditLeadCollector:
         keywords: list[str],
         request_limit: int,
         max_candidates: int,
+        time_filter: str = "month",
     ) -> list[CandidatePost]:
         if not subreddits:
             return []
@@ -198,6 +233,7 @@ class RedditLeadCollector:
                     subreddit_name,
                     keyword,
                     per_query_limit,
+                    time_filter,
                 )
 
                 for item in listing:
@@ -263,8 +299,9 @@ class RedditLeadCollector:
         subreddit_name: str,
         keyword: str,
         limit: int,
+        time_filter: str = "month",
     ) -> list[dict[str, Any]]:
-        cache_key = f"{subreddit_name}|{keyword.lower()}|{limit}"
+        cache_key = f"{subreddit_name}|{keyword.lower()}|{limit}|{time_filter}"
         now = time.time()
         cached = self._public_search_cache.get(cache_key)
         if cached and (now - cached[0] <= PUBLIC_SEARCH_CACHE_TTL_SECONDS):
@@ -273,7 +310,7 @@ class RedditLeadCollector:
         encoded_keyword = urllib.parse.quote(keyword)
         url = (
             f"https://www.reddit.com/r/{subreddit_name}/search.json"
-            f"?q={encoded_keyword}&restrict_sr=1&sort=relevance&t=month&limit={limit}"
+            f"?q={encoded_keyword}&restrict_sr=1&sort=new&t={time_filter}&limit={limit}"
         )
 
         user_agent = self.user_agent or "f1bot-local"

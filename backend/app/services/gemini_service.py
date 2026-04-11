@@ -86,7 +86,7 @@ class GeminiLeadScorer:
         compact_business = self._compact(request.business_description, PROMPT_MAX_BUSINESS_CHARS)
 
         prompt = (
-            "You are an expert B2B lead qualifier for outbound outreach. "
+            "You are an expert lead qualifier for startup outreach across B2B and B2C products. "
             "Score each Reddit post for fit with the business below.\n"
             "Return ONLY a JSON array sorted by lead_score descending. No markdown, no explanation text.\n"
             "Each row schema: {post_id, lead_score, qualification_reason, suggested_outreach}.\n"

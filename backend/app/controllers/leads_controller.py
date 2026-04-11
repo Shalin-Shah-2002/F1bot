@@ -31,11 +31,20 @@ class LeadsController:
             model_lite=settings.gemini_model_lite,
         )
 
-        candidate_posts = await collector.fetch_candidate_posts(payload)
+        # Load which Reddit posts this user has already seen so we skip them.
+        seen_post_ids = self.repository.get_seen_post_ids(user_id)
+
+        candidate_posts = await collector.fetch_candidate_posts(
+            payload, seen_post_ids=seen_post_ids
+        )
         lead_insights = await scorer.score_posts(payload, candidate_posts)
 
         scan_id = str(uuid4())
         self.repository.save_scan_results(user_id, scan_id, lead_insights)
+
+        # Mark every surfaced post as seen so next scan returns different leads.
+        new_post_ids = {insight.post.id for insight in lead_insights}
+        self.repository.mark_posts_seen(user_id, new_post_ids)
 
         return LeadScanResponse(
             leads=lead_insights[: payload.limit],

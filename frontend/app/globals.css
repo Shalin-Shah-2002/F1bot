@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+html {
+  overflow-x: hidden;
+}
+
 :root {
   --brand-navy: #124e78;
   --brand-cream: #f0f0c9;
@@ -13,7 +17,6 @@
 body {
   margin: 0;
   min-height: 100vh;
-  overflow-x: hidden;
   font-family: var(--font-dm-sans), "Segoe UI", sans-serif;
   background:
     radial-gradient(circle at 16% 12%, rgba(242, 187, 5, 0.22) 0, transparent 40%),
@@ -206,6 +209,16 @@ body {
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Background for sticky leads header so content doesn't show through */
+.leads-sticky-bg {
+  background:
+    radial-gradient(circle at 16% 12%, rgba(242, 187, 5, 0.22) 0, transparent 40%),
+    radial-gradient(circle at 85% 0, rgba(18, 78, 120, 0.24) 0, transparent 45%),
+    radial-gradient(circle at 92% 80%, rgba(215, 78, 9, 0.16) 0, transparent 38%),
+    var(--brand-cream);
+  padding-top: 0.5rem;
 }
 
 @keyframes page-enter {

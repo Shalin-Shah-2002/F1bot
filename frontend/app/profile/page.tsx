@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import { getProfile, saveProfile } from "@/lib/api";
 import { useSessionGuard } from "@/lib/use-session-guard";
 
-const DEFAULT_DESCRIPTION = "We help founders identify high-intent Reddit conversations and convert them to sales opportunities.";
-const DEFAULT_KEYWORDS = "need help,looking for,recommend,best tool";
-const DEFAULT_SUBREDDITS = "entrepreneur,smallbusiness,marketing,sales";
+const DEFAULT_DESCRIPTION = "CalPal is a calorie tracker that helps people lose weight consistently with simple meal logging, macro guidance, and accountability nudges.";
+const DEFAULT_KEYWORDS = "calorie tracker,calorie counting app,macro tracking,lose weight app,weight loss plateau,fitness app recommendation";
+const DEFAULT_SUBREDDITS = "loseit,CICO,nutrition,weightlossadvice,Fitness,MealPrepSunday,PCOSloseit";
 
 export default function ProfilePage() {
   const router = useRouter();

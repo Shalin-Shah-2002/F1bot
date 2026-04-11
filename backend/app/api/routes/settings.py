@@ -9,7 +9,7 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 @router.get("")
 async def get_runtime_settings(_: str = Depends(get_authenticated_user_id)) -> dict[str, bool | str | int]:
     settings = get_settings()
-    supabase_configured = bool(settings.supabase_url and settings.supabase_service_role_key)
+    supabase_configured = bool(settings.supabase_url and settings.supabase_anon_key)
     return {
         "environment": settings.app_env,
         "gemini_configured": bool(settings.gemini_api_key),

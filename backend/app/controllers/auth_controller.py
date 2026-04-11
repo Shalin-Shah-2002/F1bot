@@ -25,7 +25,7 @@ class AuthController:
         if not settings.use_supabase_auth():
             return False
 
-        has_supabase_config = bool(settings.supabase_url and settings.supabase_service_role_key)
+        has_supabase_config = bool(settings.supabase_url and settings.supabase_anon_key)
         if not has_supabase_config:
             raise HTTPException(status_code=500, detail=ERROR_AUTH_CONFIGURATION)
 

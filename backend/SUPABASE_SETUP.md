@@ -6,6 +6,8 @@ Set these in `backend/.env`:
 
 ```env
 SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
+# Optional: only for admin/background tasks.
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 SUPABASE_AUTH_ENABLED=true
 LOCAL_AUTH_FALLBACK_ENABLED=false
@@ -62,9 +64,9 @@ create index if not exists idx_leads_status on leads (status);
 create index if not exists idx_leads_score_desc on leads (lead_score desc);
 ```
 
-## 3) Optional RLS
+## 3) RLS
 
-If you enable RLS, create policies according to your auth model. Current backend uses service role key and handles filtering by `user_id` in API queries.
+RLS should be enabled for user-facing tables. Current backend user data paths use user-scoped bearer tokens so RLS can enforce row ownership as a defense-in-depth control.
 
 ## 4) Auth Behavior
 

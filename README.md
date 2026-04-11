@@ -90,7 +90,7 @@ The repo includes a FastAPI backend and a Next.js frontend dashboard.
 
 ### Startup validation
 
-Backend startup fails fast when auth mode and configuration are inconsistent (for example, auth enabled but missing Supabase URL/key or client initialization failure).
+Backend startup fails fast when auth mode and configuration are inconsistent (for example, auth enabled but missing Supabase URL/anon key or client initialization failure).
 
 ## 3. Repository Structure
 
@@ -330,7 +330,8 @@ Allowed status values:
 | REDDIT_CLIENT_SECRET | No | Optional for authenticated Reddit path |
 | REDDIT_USER_AGENT | No | Reddit user agent |
 | SUPABASE_URL | Conditionally required | Required when Supabase auth is enabled |
-| SUPABASE_SERVICE_ROLE_KEY | Conditionally required | Required when Supabase auth is enabled |
+| SUPABASE_ANON_KEY | Conditionally required | Required when Supabase auth is enabled |
+| SUPABASE_SERVICE_ROLE_KEY | No | Optional; admin/background tasks only |
 | SUPABASE_AUTH_ENABLED | No | Explicitly toggles Supabase auth mode |
 | SCAN_RATE_LIMIT_PER_MINUTE | No | Rate limit count (default 6) |
 | SCAN_RATE_LIMIT_WINDOW_SECONDS | No | Rate limit window (default 60) |
@@ -393,7 +394,7 @@ Use this checklist before production go-live:
 
 1. Set `APP_ENV=production`.
 2. Set `SUPABASE_AUTH_ENABLED=true`.
-3. Provide valid `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`.
+3. Provide valid `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
 4. Configure `FRONTEND_ORIGIN` to your deployed frontend domain.
 5. Configure `NEXT_PUBLIC_API_BASE_URL` to deployed backend URL.
 6. Run Supabase SQL schema from `backend/SUPABASE_SETUP.md`.

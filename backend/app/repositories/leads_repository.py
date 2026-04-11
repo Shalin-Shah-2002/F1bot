@@ -3,7 +3,7 @@ from typing import Any
 from uuid import uuid4
 
 from app.models.schemas import CandidatePost, LeadInsight, LeadRecord, LeadStatus
-from app.repositories.memory_store import MEMORY_LEADS
+from app.repositories.memory_store import MEMORY_LEADS, MEMORY_SEEN_POSTS
 
 SupabaseClient = Any
 
@@ -97,6 +97,34 @@ class LeadsRepository:
         ).eq("id", lead_id).eq("user_id", user_id).execute()
 
         return self.get_lead(user_id=user_id, lead_id=lead_id)
+
+    # ------------------------------------------------------------------
+    # Seen-post deduplication helpers
+    # ------------------------------------------------------------------
+
+    def get_seen_post_ids(self, user_id: str) -> set[str]:
+        """Return the set of Reddit post IDs already surfaced to this user."""
+        if self.client is None:
+            return set(MEMORY_SEEN_POSTS.get(user_id, set()))
+
+        rows = (
+            self.client.table("leads")
+            .select("post_id")
+            .eq("user_id", user_id)
+            .execute()
+            .data
+            or []
+        )
+        return {str(row["post_id"]) for row in rows if row.get("post_id")}
+
+    def mark_posts_seen(self, user_id: str, post_ids: set[str]) -> None:
+        """Record that these post IDs have now been shown to the user."""
+        if self.client is None:
+            existing = MEMORY_SEEN_POSTS.setdefault(user_id, set())
+            existing.update(post_ids)
+            return
+        # With Supabase the leads table already stores post_id per row,
+        # so get_seen_post_ids will naturally pick them up — no extra work needed.
 
     def _to_row(self, record: LeadRecord) -> dict[str, object]:
         return {
