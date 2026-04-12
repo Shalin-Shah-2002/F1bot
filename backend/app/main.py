@@ -37,12 +37,22 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
+is_production_environment = settings.app_env.lower() in {"production", "prod"}
+cors_allow_methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] if is_production_environment else ["*"]
+cors_allow_headers = [
+    "Authorization",
+    "Content-Type",
+    "Accept",
+    "Origin",
+    "X-Requested-With",
+] if is_production_environment else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_origin],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"]
+    allow_methods=cors_allow_methods,
+    allow_headers=cors_allow_headers,
 )
 
 app.include_router(auth_router)

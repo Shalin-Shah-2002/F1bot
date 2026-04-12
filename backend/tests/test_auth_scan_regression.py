@@ -186,6 +186,33 @@ def test_startup_fails_if_local_fallback_not_opted_in(monkeypatch: pytest.Monkey
             pass
 
 
+def test_cors_uses_explicit_allowlists_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("SUPABASE_AUTH_ENABLED", "false")
+    monkeypatch.setenv("LOCAL_AUTH_FALLBACK_ENABLED", "true")
+
+    _reset_runtime_state()
+
+    import app.main as main_module
+
+    importlib.reload(main_module)
+
+    cors = next(m for m in main_module.app.user_middleware if m.cls.__name__ == "CORSMiddleware")
+
+    assert cors.kwargs["allow_methods"] == ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    assert cors.kwargs["allow_headers"] == [
+        "Authorization",
+        "Content-Type",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+    ]
+    assert "*" not in cors.kwargs["allow_methods"]
+    assert "*" not in cors.kwargs["allow_headers"]
+
+    _reset_runtime_state()
+
+
 def test_settings_fail_closed_when_local_fallback_not_explicit() -> None:
     from app.core.config import Settings
 
