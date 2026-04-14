@@ -10,6 +10,7 @@ from app.api.routes.leads import router as leads_router
 from app.api.routes.profile import router as profile_router
 from app.api.routes.settings import router as settings_router
 from app.core.config import get_settings
+from app.core.scan_limits import validate_auth_limits_startup_configuration
 from app.core.supabase_client import get_supabase_auth_client
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ settings = get_settings()
 def _validate_startup_configuration() -> None:
     runtime_settings = get_settings()
     runtime_settings.validate_auth_configuration()
+    validate_auth_limits_startup_configuration()
 
     if runtime_settings.use_supabase_auth() and get_supabase_auth_client() is None:
         raise RuntimeError(

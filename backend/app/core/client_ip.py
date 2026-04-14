@@ -7,6 +7,7 @@ from fastapi import Request
 from app.core.config import get_settings
 
 UNKNOWN_REMOTE_IP = "unknown"
+PROXIED_DEPLOYMENT_ENVS = frozenset({"production", "prod", "staging", "stage"})
 
 IPAddress = IPv4Address | IPv6Address
 IPNetwork = IPv4Network | IPv6Network
@@ -83,6 +84,52 @@ def _parse_x_forwarded_for(x_forwarded_for: str | None) -> list[str]:
             hops.append(normalized)
 
     return hops
+
+
+def _normalize_trusted_proxy_cidrs(
+    trusted_proxy_cidrs: list[str] | tuple[str, ...],
+) -> tuple[str, ...]:
+    normalized: list[str] = []
+
+    for raw_cidr in trusted_proxy_cidrs:
+        cidr = str(raw_cidr).strip()
+        if cidr:
+            normalized.append(cidr)
+
+    return tuple(normalized)
+
+
+def _is_valid_trusted_proxy_cidr(cidr: str) -> bool:
+    try:
+        if "/" in cidr:
+            ip_network(cidr, strict=False)
+        else:
+            ip_address(cidr)
+    except ValueError:
+        return False
+
+    return True
+
+
+def validate_trusted_proxy_startup_configuration(
+    app_env: str,
+    trusted_proxy_cidrs: list[str] | tuple[str, ...],
+) -> None:
+    normalized_env = (app_env or "").strip().lower()
+    normalized_cidrs = _normalize_trusted_proxy_cidrs(trusted_proxy_cidrs)
+
+    invalid_cidrs = [cidr for cidr in normalized_cidrs if not _is_valid_trusted_proxy_cidr(cidr)]
+    if invalid_cidrs:
+        raise RuntimeError(
+            "TRUSTED_PROXY_CIDRS contains invalid entries: "
+            f"{', '.join(invalid_cidrs)}"
+        )
+
+    if normalized_env in PROXIED_DEPLOYMENT_ENVS and not normalized_cidrs:
+        raise RuntimeError(
+            "TRUSTED_PROXY_CIDRS must be configured for proxied deployments "
+            f"when APP_ENV={normalized_env}."
+        )
 
 
 def _resolve_client_ip(

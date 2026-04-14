@@ -34,6 +34,9 @@ ENV_AUTH_RATE_LIMIT_WINDOW_SECONDS = "AUTH_RATE_LIMIT_WINDOW_SECONDS"
 ENV_AUTH_LOCKOUT_THRESHOLD = "AUTH_LOCKOUT_THRESHOLD"
 ENV_AUTH_LOCKOUT_BASE_SECONDS = "AUTH_LOCKOUT_BASE_SECONDS"
 ENV_AUTH_LOCKOUT_MAX_SECONDS = "AUTH_LOCKOUT_MAX_SECONDS"
+ENV_RATE_LIMIT_STORE = "RATE_LIMIT_STORE"
+ENV_REDIS_URL = "REDIS_URL"
+ENV_REDIS_KEY_PREFIX = "REDIS_KEY_PREFIX"
 ENV_TRUSTED_PROXY_CIDRS = "TRUSTED_PROXY_CIDRS"
 
 # Settings defaults (overridable via .env)
@@ -53,6 +56,8 @@ DEFAULT_AUTH_RATE_LIMIT_WINDOW_SECONDS = 300
 DEFAULT_AUTH_LOCKOUT_THRESHOLD = 5
 DEFAULT_AUTH_LOCKOUT_BASE_SECONDS = 30
 DEFAULT_AUTH_LOCKOUT_MAX_SECONDS = 900
+DEFAULT_RATE_LIMIT_STORE = "redis"
+DEFAULT_REDIS_KEY_PREFIX = "f1bot:ratelimit"
 
 SUPABASE_AUTH_DISABLED_ENVS = ("development", "dev", "local", "test")
 
@@ -67,6 +72,7 @@ ERROR_SCAN_RATE_LIMIT = "Scan rate limit exceeded. Please retry later."
 ERROR_SCAN_DAILY_QUOTA = "Daily scan quota reached. Please try again tomorrow."
 ERROR_AUTH_RATE_LIMIT = "Too many authentication attempts. Please retry later."
 ERROR_AUTH_LOCKED = "Too many failed authentication attempts. Please retry later."
+ERROR_RATE_LIMIT_BACKEND_UNAVAILABLE = "Rate limit service is temporarily unavailable. Please retry later."
 
 # Local/dev auth
 DEMO_TOKEN_PREFIX = "demo-token-"

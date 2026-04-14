@@ -33,9 +33,12 @@ def build_test_client(monkeypatch: pytest.MonkeyPatch, **env_overrides: str | No
         "APP_ENV": "development",
         "SUPABASE_AUTH_ENABLED": "false",
         "LOCAL_AUTH_FALLBACK_ENABLED": "true",
-        "SUPABASE_URL": None,
-        "SUPABASE_ANON_KEY": None,
-        "SUPABASE_SERVICE_ROLE_KEY": None,
+        "SUPABASE_URL": "",
+        "SUPABASE_ANON_KEY": "",
+        "SUPABASE_SERVICE_ROLE_KEY": "",
+        "RATE_LIMIT_STORE": "memory",
+        "REDIS_URL": "",
+        "REDIS_KEY_PREFIX": "f1bot:test:ratelimit",
         "SCAN_RATE_LIMIT_PER_MINUTE": "6",
         "SCAN_RATE_LIMIT_WINDOW_SECONDS": "60",
         "SCAN_DAILY_QUOTA": "200",
@@ -110,7 +113,11 @@ def test_scan_rate_limit_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.services.gemini_service import GeminiLeadScorer
     from app.services.reddit_service import RedditLeadCollector
 
-    async def _fake_fetch(self: RedditLeadCollector, request: object) -> list[object]:
+    async def _fake_fetch(
+        self: RedditLeadCollector,
+        request: object,
+        seen_post_ids: set[str] | None = None,
+    ) -> list[object]:
         return []
 
     async def _fake_score(self: GeminiLeadScorer, request: object, posts: list[object]) -> list[object]:
@@ -138,7 +145,11 @@ def test_scan_daily_quota_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.services.gemini_service import GeminiLeadScorer
     from app.services.reddit_service import RedditLeadCollector
 
-    async def _fake_fetch(self: RedditLeadCollector, request: object) -> list[object]:
+    async def _fake_fetch(
+        self: RedditLeadCollector,
+        request: object,
+        seen_post_ids: set[str] | None = None,
+    ) -> list[object]:
         return []
 
     async def _fake_score(self: GeminiLeadScorer, request: object, posts: list[object]) -> list[object]:
@@ -183,6 +194,23 @@ def test_startup_fails_if_local_fallback_not_opted_in(monkeypatch: pytest.Monkey
             SUPABASE_URL=None,
             SUPABASE_SERVICE_ROLE_KEY=None,
         ):
+            pass
+
+
+def test_startup_runs_auth_limits_proxy_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    import app.core.scan_limits as scan_limits_module
+
+    def _raise_proxy_validation_error() -> None:
+        raise RuntimeError("proxy startup validation triggered")
+
+    monkeypatch.setattr(
+        scan_limits_module,
+        "validate_auth_limits_startup_configuration",
+        _raise_proxy_validation_error,
+    )
+
+    with pytest.raises(RuntimeError, match="proxy startup validation triggered"):
+        with build_test_client(monkeypatch):
             pass
 
 
@@ -240,6 +268,33 @@ def test_settings_parse_trusted_proxy_cidrs_from_csv() -> None:
     )
 
     assert settings.trusted_proxy_cidrs == ["10.0.0.0/8", "192.168.0.10"]
+
+
+def test_settings_require_redis_url_for_redis_rate_limit_store() -> None:
+    from app.core.config import Settings
+
+    settings = Settings(
+        _env_file=None,
+        APP_ENV="development",
+        RATE_LIMIT_STORE="redis",
+        REDIS_URL="",
+    )
+
+    with pytest.raises(RuntimeError):
+        settings.validate_rate_limit_configuration()
+
+
+def test_settings_disallow_memory_rate_limit_store_in_production() -> None:
+    from app.core.config import Settings
+
+    settings = Settings(
+        _env_file=None,
+        APP_ENV="production",
+        RATE_LIMIT_STORE="memory",
+    )
+
+    with pytest.raises(RuntimeError):
+        settings.validate_rate_limit_configuration()
 
 
 def test_settings_require_anon_key_when_supabase_auth_enabled() -> None:
