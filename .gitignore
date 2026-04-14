@@ -22,3 +22,6 @@ frontend/out/
 .env.*
 !.env.example
 !.env.local.example
+!backend/.env.example
+!backend/.env.production.example
+!frontend/.env.local.example

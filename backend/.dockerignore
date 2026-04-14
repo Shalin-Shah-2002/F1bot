@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+.venv/
+.env
+.env.*
+.pytest_cache/
+.mypy_cache/
+
+tests/
+*.md

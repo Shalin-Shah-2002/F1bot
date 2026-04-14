@@ -37,7 +37,8 @@ The repo includes a FastAPI backend and a Next.js frontend dashboard.
 - [11. Known Limitations](#11-known-limitations)
 - [12. Troubleshooting](#12-troubleshooting)
 - [13. Related Docs](#13-related-docs)
-- [14. Build In Public And Contribute](#14-build-in-public-and-contribute)
+- [14. Backend CI/CD to GCE](#14-backend-cicd-to-gce)
+- [15. Build In Public And Contribute](#15-build-in-public-and-contribute)
 
 ## 1. Project Overview
 
@@ -476,7 +477,62 @@ Use this checklist before production go-live:
 	- `docs/FEATURE_COMPARISON.md`
 	- `docs/BACKEND_API_PLAN.md`
 
-## 14. Build In Public And Contribute
+## 14. Backend CI/CD to GCE
+
+Backend production deployment is automated for the API only.
+
+On every commit to `main` that changes backend files, GitHub Actions will:
+
+1. Build a backend Docker image (`f1bot-backend:<commit_sha>`).
+2. Export it as a compressed archive.
+3. Copy image + compose + env + deploy script to your VM.
+4. SSH into your instance (`shalin-e2-gcp`) and run Docker Compose.
+5. Ensure both backend API and Redis are running.
+
+CI/CD files:
+
+- `backend/Dockerfile`
+- `backend/.dockerignore`
+- `backend/docker-compose.prod.yml`
+- `backend/deploy/deploy_remote.sh`
+- `.github/workflows/backend-cicd.yml`
+
+### 14.1 GitHub Secrets Required
+
+Add these repository secrets before running the workflow:
+
+1. `GCP_SA_KEY`: Service account JSON key with Compute SSH/SCP permissions.
+2. `GCP_PROJECT_ID`: GCP project id containing the VM.
+3. `GCP_ZONE`: VM zone (for example `asia-south1-a`).
+4. `BACKEND_ENV_FILE`: Full multi-line backend runtime `.env` content.
+
+Use `backend/.env.production.example` as the template for `BACKEND_ENV_FILE`, then fill in real production secrets.
+
+### 14.2 VM Prerequisites
+
+1. Docker Engine installed.
+2. Docker Compose plugin installed (`docker compose version`).
+3. SSH access works from gcloud:
+
+```bash
+gcloud compute ssh shalin-e2-gcp
+```
+
+4. VM user can run Docker commands.
+5. Firewall allows inbound traffic to your backend port (default `8000`).
+
+### 14.3 First Deployment Behavior
+
+The remote deploy script creates `~/f1bot-backend` on first run, then keeps reusing it:
+
+- writes `docker-compose.yml`
+- writes `.env`
+- loads the transferred image
+- runs `docker compose up -d --remove-orphans`
+
+Redis data is persisted in a Docker volume named `redis_data`.
+
+## 15. Build In Public And Contribute
 
 I am building this Reddit lead generation platform not only to ship a project, but also to continuously improve engineering quality. I actively review and harden the backend for reliability, trust, and production-grade behavior while learning in public.
 

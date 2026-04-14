@@ -1,0 +1,75 @@
+name: Backend CI/CD to GCE
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-cicd.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: backend-prod-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      IMAGE_TAG: f1bot-backend:${{ github.sha }}
+      GCP_INSTANCE: shalin-e2-gcp
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          [[ -n "${{ secrets.GCP_SA_KEY }}" ]] || { echo "Missing GCP_SA_KEY secret"; exit 1; }
+          [[ -n "${{ secrets.GCP_PROJECT_ID }}" ]] || { echo "Missing GCP_PROJECT_ID secret"; exit 1; }
+          [[ -n "${{ secrets.GCP_ZONE }}" ]] || { echo "Missing GCP_ZONE secret"; exit 1; }
+          [[ -n "${{ secrets.BACKEND_ENV_FILE }}" ]] || { echo "Missing BACKEND_ENV_FILE secret"; exit 1; }
+
+      - name: Build backend image
+        run: docker build -t "${IMAGE_TAG}" backend
+
+      - name: Export backend image archive
+        run: docker save "${IMAGE_TAG}" | gzip > f1bot-backend-image.tar.gz
+
+      - name: Create runtime env file from secret
+        shell: bash
+        run: |
+          cat > f1bot-backend.env <<'EOF'
+          ${{ secrets.BACKEND_ENV_FILE }}
+          EOF
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup gcloud CLI
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Copy deployment bundle to VM
+        run: |
+          gcloud compute scp \
+            --zone "${{ secrets.GCP_ZONE }}" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            f1bot-backend-image.tar.gz \
+            backend/docker-compose.prod.yml \
+            backend/deploy/deploy_remote.sh \
+            f1bot-backend.env \
+            "${GCP_INSTANCE}:/tmp/"
+
+      - name: Deploy to VM using Docker Compose
+        run: |
+          gcloud compute ssh "${GCP_INSTANCE}" \
+            --zone "${{ secrets.GCP_ZONE }}" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --command "chmod +x /tmp/deploy_remote.sh && /tmp/deploy_remote.sh ${IMAGE_TAG}"
