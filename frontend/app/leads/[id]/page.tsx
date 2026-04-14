@@ -18,7 +18,7 @@ export default function LeadDetailPage() {
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!session?.accessToken) {
+    if (!session) {
       return;
     }
 
@@ -37,10 +37,10 @@ export default function LeadDetailPage() {
     }
 
     loadLead();
-  }, [params.id, session?.accessToken]);
+  }, [params.id, session]);
 
   async function handleUpdateStatus() {
-    if (!session?.accessToken || !lead) {
+    if (!session || !lead) {
       return;
     }
 

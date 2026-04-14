@@ -10,7 +10,7 @@ export default function RegisterPage() {
   const router = useRouter();
   const [fullName, setFullName] = useState("Founder");
   const [email, setEmail] = useState("founder@f1bot.ai");
-  const [password, setPassword] = useState("password123");
+  const [password, setPassword] = useState("WrongPass123!");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,8 +33,7 @@ export default function RegisterPage() {
 
       saveSession({
         userId: response.user_id,
-        email: response.email,
-        accessToken: response.access_token
+        email: response.email
       });
 
       router.push("/profile");
@@ -96,10 +95,14 @@ export default function RegisterPage() {
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
                 className="brand-input"
-                minLength={6}
+                minLength={10}
                 required
               />
             </label>
+
+            <p className="text-xs text-brand-navy/70">
+              Use at least 10 characters with uppercase, lowercase, number, and symbol.
+            </p>
 
             <button type="submit" disabled={loading} className="brand-btn-primary mt-2 px-4 py-2.5 disabled:opacity-50">
               {loading ? "Creating account..." : "Register"}

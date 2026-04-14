@@ -9,7 +9,7 @@ import { saveSession } from "@/lib/session";
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("founder@f1bot.ai");
-  const [password, setPassword] = useState("password123");
+  const [password, setPassword] = useState("WrongPass123!");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -22,8 +22,7 @@ export default function LoginPage() {
       const response = await login({ email, password });
       saveSession({
         userId: response.user_id,
-        email: response.email,
-        accessToken: response.access_token
+        email: response.email
       });
       router.push("/profile");
     } catch (requestError) {

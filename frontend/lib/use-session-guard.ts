@@ -15,16 +15,30 @@ export function useSessionGuard(redirectPath = "/login"): SessionGuardState {
   const [isCheckingSession, setIsCheckingSession] = useState(true);
 
   useEffect(() => {
-    const currentSession = getSession();
-    if (!currentSession) {
-      setSession(null);
+    let isActive = true;
+
+    async function hydrateSession() {
+      const currentSession = await getSession();
+      if (!isActive) {
+        return;
+      }
+
+      if (!currentSession) {
+        setSession(null);
+        setIsCheckingSession(false);
+        router.replace(redirectPath);
+        return;
+      }
+
+      setSession(currentSession);
       setIsCheckingSession(false);
-      router.replace(redirectPath);
-      return;
     }
 
-    setSession(currentSession);
-    setIsCheckingSession(false);
+    hydrateSession();
+
+    return () => {
+      isActive = false;
+    };
   }, [redirectPath, router]);
 
   return { session, isCheckingSession };

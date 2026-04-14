@@ -11,7 +11,7 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!session?.accessToken) {
+    if (!session) {
       return;
     }
 
@@ -27,7 +27,7 @@ export default function SettingsPage() {
     }
 
     loadSettings();
-  }, [session?.accessToken]);
+  }, [session]);
 
   if (isCheckingSession) {
     return <main className="mx-auto max-w-4xl px-6 py-10 text-brand-navy/75">Checking your session...</main>;

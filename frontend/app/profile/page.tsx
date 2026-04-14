@@ -19,7 +19,7 @@ export default function ProfilePage() {
   const [status, setStatus] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!session?.accessToken) {
+    if (!session) {
       return;
     }
 
@@ -35,7 +35,7 @@ export default function ProfilePage() {
     }
 
     loadProfile();
-  }, [session?.accessToken]);
+  }, [session]);
 
   const canSave = useMemo(() => businessDescription.trim().length >= 10 && !loading, [businessDescription, loading]);
 
@@ -59,7 +59,7 @@ export default function ProfilePage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!session?.accessToken) {
+    if (!session) {
       return;
     }
 

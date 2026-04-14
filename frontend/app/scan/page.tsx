@@ -26,7 +26,7 @@ export default function ScanPage() {
   const [scanCount, setScanCount] = useState(0);
 
   useEffect(() => {
-    if (!session?.accessToken) {
+    if (!session) {
       return;
     }
 
@@ -46,7 +46,7 @@ export default function ScanPage() {
     }
 
     hydrateFromProfile();
-  }, [session?.accessToken]);
+  }, [session]);
 
   const canSubmit = useMemo(
     () => businessDescription.trim().length > 10 && !loading,
@@ -73,7 +73,7 @@ export default function ScanPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!session?.accessToken) {
+    if (!session) {
       return;
     }
 

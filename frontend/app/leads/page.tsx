@@ -17,7 +17,7 @@ export default function LeadsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const loadLeads = useCallback(async (nextStatus: LeadStatus | "all") => {
-    if (!session?.accessToken) {
+    if (!session) {
       return;
     }
 
@@ -33,14 +33,14 @@ export default function LeadsPage() {
     } finally {
       setLoading(false);
     }
-  }, [session?.accessToken]);
+  }, [session]);
 
   useEffect(() => {
-    if (!session?.accessToken) {
+    if (!session) {
       return;
     }
     loadLeads("all");
-  }, [loadLeads, session?.accessToken]);
+  }, [loadLeads, session]);
 
   const totalByStatus = useMemo(() => {
     return leads.reduce(

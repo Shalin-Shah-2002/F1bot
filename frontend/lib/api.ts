@@ -1,4 +1,4 @@
-import { clearSession, getSession } from "@/lib/session";
+import { clearSession, clearSessionCache, getCsrfToken } from "@/lib/session";
 
 export interface CandidatePost {
   id: string;
@@ -42,8 +42,8 @@ export interface LoginRequest {
 export interface LoginResponse {
   user_id: string;
   email: string;
-  access_token: string;
-  token_type: string;
+  access_token?: string;
+  token_type?: string;
 }
 
 export interface RegisterRequest {
@@ -55,8 +55,8 @@ export interface RegisterRequest {
 export interface RegisterResponse {
   user_id: string;
   email: string;
-  access_token: string;
-  token_type: string;
+  access_token?: string;
+  token_type?: string;
 }
 
 export interface BusinessProfile {
@@ -124,6 +124,7 @@ const processEnv =
     : undefined;
 
 const API_BASE_URL = processEnv?.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:8000";
+const CSRF_HEADER_NAME = "X-CSRF-Token";
 
 function toHeaderObject(headers?: HeadersInit): Record<string, string> {
   if (!headers) {
@@ -141,15 +142,23 @@ function toHeaderObject(headers?: HeadersInit): Record<string, string> {
   return { ...headers };
 }
 
-function getAuthorizationHeader(): Record<string, string> {
-  const session = getSession();
+function requiresCsrf(method?: string): boolean {
+  const normalized = (method || "GET").toUpperCase();
+  return normalized === "POST" || normalized === "PUT" || normalized === "PATCH" || normalized === "DELETE";
+}
 
-  if (!session?.accessToken) {
-    throw new Error("Authentication required. Please log in again.");
+function buildCsrfHeader(method?: string): Record<string, string> {
+  if (!requiresCsrf(method)) {
+    return {};
+  }
+
+  const csrfToken = getCsrfToken();
+  if (!csrfToken?.trim()) {
+    throw new Error("Session security token missing. Please log in again.");
   }
 
   return {
-    Authorization: `Bearer ${session.accessToken}`
+    [CSRF_HEADER_NAME]: csrfToken,
   };
 }
 
@@ -189,10 +198,13 @@ async function parseErrorResponse(response: Response): Promise<string> {
 }
 
 function handleUnauthorizedResponse(): never {
-  clearSession();
+  clearSessionCache();
+  void clearSession();
+
   if (typeof window !== "undefined") {
     window.location.assign("/login");
   }
+
   throw new Error("Session expired. Please log in again.");
 }
 
@@ -203,6 +215,7 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
     response = await fetch(`${API_BASE_URL}${path}`, {
       ...init,
       cache: init?.cache ?? "no-store",
+      credentials: init?.credentials ?? "include",
       headers: {
         Accept: "application/json",
         ...toHeaderObject(init?.headers)
@@ -219,9 +232,9 @@ async function authenticatedFetch(path: string, init?: RequestInit): Promise<Res
   const response = await apiFetch(path, {
     ...init,
     headers: {
-      ...getAuthorizationHeader(),
-      ...toHeaderObject(init?.headers)
-    }
+      ...buildCsrfHeader(init?.method),
+      ...toHeaderObject(init?.headers),
+    },
   });
 
   if (response.status === 401) {

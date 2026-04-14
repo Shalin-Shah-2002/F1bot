@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from app.api.dependencies import AuthContext, get_authenticated_context
+from app.api.dependencies import AuthContext, get_authenticated_context, require_csrf_for_cookie_auth
 from app.controllers.profile_controller import ProfileController
 from app.core.config import get_settings
 from app.core.constants import ERROR_AUTH_CONFIGURATION
@@ -27,7 +27,7 @@ async def get_profile(auth_context: AuthContext = Depends(get_authenticated_cont
     return controller.get_or_create_profile(user_id=auth_context.user_id)
 
 
-@router.put("", response_model=BusinessProfile)
+@router.put("", response_model=BusinessProfile, dependencies=[Depends(require_csrf_for_cookie_auth)])
 async def upsert_profile(
     payload: BusinessProfileUpsertRequest,
     auth_context: AuthContext = Depends(get_authenticated_context),

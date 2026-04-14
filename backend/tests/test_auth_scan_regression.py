@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.core.constants import (
     ERROR_AUTH_LOCKED,
     ERROR_AUTH_RATE_LIMIT,
+    ERROR_CSRF_TOKEN_INVALID,
     ERROR_LEAD_SCAN_FAILED,
     ERROR_SCAN_DAILY_QUOTA,
     ERROR_SCAN_RATE_LIMIT,
@@ -233,6 +234,7 @@ def test_cors_uses_explicit_allowlists_in_production(monkeypatch: pytest.MonkeyP
         "Content-Type",
         "Accept",
         "Origin",
+        "X-CSRF-Token",
         "X-Requested-With",
     ]
     assert "*" not in cors.kwargs["allow_methods"]
@@ -337,7 +339,7 @@ def test_login_rate_limit_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(AuthController, "login", _reject_login)
 
-    payload = {"email": "rate-test@example.com", "password": "wrong-password"}
+    payload = {"email": "rate-test@example.com", "password": "WrongPass123!"}
 
     with build_test_client(
         monkeypatch,
@@ -365,7 +367,7 @@ def test_login_lockout_enforced_after_repeated_failures(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(AuthController, "login", _reject_login)
 
-    payload = {"email": "lockout-test@example.com", "password": "wrong-password"}
+    payload = {"email": "lockout-test@example.com", "password": "WrongPass123!"}
 
     with build_test_client(
         monkeypatch,
@@ -399,7 +401,7 @@ def test_register_rate_limit_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
 
     payload = {
         "email": "register-rate-test@example.com",
-        "password": "wrong-password",
+        "password": "WrongPass123!",
         "full_name": "Rate Test",
     }
 
@@ -417,3 +419,103 @@ def test_register_rate_limit_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
     assert second.status_code == 429
     assert second.json() == {"detail": ERROR_AUTH_RATE_LIMIT}
     assert "retry-after" in {key.lower() for key in second.headers.keys()}
+
+
+def test_login_sets_auth_and_csrf_cookies(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {"email": "cookie-test@example.com", "password": "WrongPass123!"}
+
+    with build_test_client(monkeypatch) as client:
+        response = client.post("/api/auth/login", json=payload)
+        session = client.get("/api/auth/session")
+
+    assert response.status_code == 200
+    set_cookie_headers = response.headers.get_list("set-cookie")
+
+    access_cookie = next((value for value in set_cookie_headers if value.startswith("f1bot_access_token=")), "")
+    csrf_cookie = next((value for value in set_cookie_headers if value.startswith("f1bot_csrf_token=")), "")
+
+    assert access_cookie
+    assert "httponly" in access_cookie.lower()
+    assert "samesite=lax" in access_cookie.lower()
+    assert csrf_cookie
+    assert "httponly" not in csrf_cookie.lower()
+
+    assert session.status_code == 200
+    assert session.json()["email"] == payload["email"]
+
+
+def test_cookie_auth_requires_csrf_for_mutations(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {"email": "csrf-test@example.com", "password": "WrongPass123!"}
+    profile_payload = {
+        "business_description": "We help founders identify high intent Reddit conversations for outbound sales.",
+        "keywords": ["founder", "outbound"],
+        "subreddits": ["entrepreneur"],
+    }
+
+    with build_test_client(monkeypatch) as client:
+        login_response = client.post("/api/auth/login", json=payload)
+        missing_csrf = client.put("/api/profile", json=profile_payload)
+
+        csrf_token = client.cookies.get("f1bot_csrf_token")
+        with_csrf = client.put(
+            "/api/profile",
+            json=profile_payload,
+            headers={"X-CSRF-Token": str(csrf_token or "")},
+        )
+
+    assert login_response.status_code == 200
+    assert missing_csrf.status_code == 403
+    assert missing_csrf.json() == {"detail": ERROR_CSRF_TOKEN_INVALID}
+    assert with_csrf.status_code == 200
+
+
+def test_logout_requires_csrf_when_cookie_session_exists(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {"email": "logout-csrf@example.com", "password": "WrongPass123!"}
+
+    with build_test_client(monkeypatch) as client:
+        login_response = client.post("/api/auth/login", json=payload)
+        missing_csrf = client.post("/api/auth/logout")
+
+        csrf_token = client.cookies.get("f1bot_csrf_token")
+        with_csrf = client.post("/api/auth/logout", headers={"X-CSRF-Token": str(csrf_token or "")})
+        session_after_logout = client.get("/api/auth/session")
+
+    assert login_response.status_code == 200
+    assert missing_csrf.status_code == 403
+    assert missing_csrf.json() == {"detail": ERROR_CSRF_TOKEN_INVALID}
+    assert with_csrf.status_code == 204
+    assert session_after_logout.status_code == 401
+
+
+def test_login_rejects_invalid_email_format(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {"email": "not-an-email", "password": "WrongPass123!"}
+
+    with build_test_client(monkeypatch) as client:
+        response = client.post("/api/auth/login", json=payload)
+
+    assert response.status_code == 422
+    assert any(error["loc"][-1] == "email" for error in response.json()["detail"])
+
+
+def test_login_rejects_weak_password(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {"email": "weak-password@example.com", "password": "short123"}
+
+    with build_test_client(monkeypatch) as client:
+        response = client.post("/api/auth/login", json=payload)
+
+    assert response.status_code == 422
+    assert any(error["loc"][-1] == "password" for error in response.json()["detail"])
+
+
+def test_register_rejects_weak_password(monkeypatch: pytest.MonkeyPatch) -> None:
+    payload = {
+        "email": "weak-register@example.com",
+        "password": "no-symbols123",
+        "full_name": "Weak Register",
+    }
+
+    with build_test_client(monkeypatch) as client:
+        response = client.post("/api/auth/register", json=payload)
+
+    assert response.status_code == 422
+    assert any(error["loc"][-1] == "password" for error in response.json()["detail"])

@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 
-from app.api.dependencies import AuthContext, get_authenticated_context
+from app.api.dependencies import AuthContext, get_authenticated_context, require_csrf_for_cookie_auth
 from app.core.config import get_settings
 from app.controllers.leads_controller import LeadsController
 from app.core.constants import ERROR_AUTH_CONFIGURATION, ERROR_LEAD_SCAN_FAILED
@@ -33,7 +33,7 @@ def _build_controller(access_token: str) -> LeadsController:
     return LeadsController(repository=repository)
 
 
-@router.post("/scan", response_model=LeadScanResponse)
+@router.post("/scan", response_model=LeadScanResponse, dependencies=[Depends(require_csrf_for_cookie_auth)])
 async def scan_leads(
     payload: LeadScanRequest,
     auth_context: AuthContext = Depends(get_authenticated_context),
@@ -84,7 +84,7 @@ async def get_lead(
     return lead
 
 
-@router.patch("/{lead_id}/status", response_model=LeadRecord)
+@router.patch("/{lead_id}/status", response_model=LeadRecord, dependencies=[Depends(require_csrf_for_cookie_auth)])
 async def update_lead_status(
     lead_id: str,
     payload: LeadStatusUpdateRequest,

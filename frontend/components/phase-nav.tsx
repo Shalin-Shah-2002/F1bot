@@ -28,10 +28,31 @@ export function PhaseNav() {
   const isLandingPage = pathname === "/";
 
   useEffect(() => {
-    const session = getSession();
-    setEmail(session?.email ?? "Not signed in");
-    setIsAuthenticated(Boolean(session?.accessToken));
+    let isActive = true;
+
+    async function hydrateNavSession() {
+      const session = await getSession();
+      if (!isActive) {
+        return;
+      }
+
+      setEmail(session?.email || "Not signed in");
+      setIsAuthenticated(Boolean(session));
+    }
+
+    hydrateNavSession();
+
+    return () => {
+      isActive = false;
+    };
   }, [pathname]);
+
+  async function handleLogout() {
+    await clearSession();
+    setEmail("Not signed in");
+    setIsAuthenticated(false);
+    router.replace("/login");
+  }
 
   return (
     <header className="sticky top-0 z-20 border-b border-brand-navy/18 bg-brand-cream/82 backdrop-blur-xl">
@@ -86,8 +107,7 @@ export function PhaseNav() {
                 <button
                   type="button"
                   onClick={() => {
-                    clearSession();
-                    router.replace("/login");
+                    void handleLogout();
                   }}
                   className="rounded-md bg-brand-burgundy px-3 py-1.5 text-sm font-medium text-brand-cream transition-colors hover:bg-brand-orange"
                 >
@@ -116,8 +136,7 @@ export function PhaseNav() {
               <button
                 type="button"
                 onClick={() => {
-                  clearSession();
-                  router.replace("/login");
+                  void handleLogout();
                 }}
                 className="rounded-md bg-brand-burgundy px-3 py-1.5 text-sm font-medium text-brand-cream transition-colors hover:bg-brand-orange"
               >

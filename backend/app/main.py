@@ -46,6 +46,7 @@ cors_allow_headers = [
     "Content-Type",
     "Accept",
     "Origin",
+    "X-CSRF-Token",
     "X-Requested-With",
 ] if is_production_environment else ["*"]
 

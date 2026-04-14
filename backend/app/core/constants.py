@@ -73,6 +73,7 @@ ERROR_SCAN_DAILY_QUOTA = "Daily scan quota reached. Please try again tomorrow."
 ERROR_AUTH_RATE_LIMIT = "Too many authentication attempts. Please retry later."
 ERROR_AUTH_LOCKED = "Too many failed authentication attempts. Please retry later."
 ERROR_RATE_LIMIT_BACKEND_UNAVAILABLE = "Rate limit service is temporarily unavailable. Please retry later."
+ERROR_CSRF_TOKEN_INVALID = "Invalid CSRF token. Please refresh and try again."
 
 # Local/dev auth
 DEMO_TOKEN_PREFIX = "demo-token-"

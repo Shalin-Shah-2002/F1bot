@@ -16,15 +16,15 @@ export default function ExportPage() {
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!session?.accessToken) {
+    if (!session) {
       return;
     }
 
     setMessage(null);
-  }, [session?.accessToken]);
+  }, [session]);
 
   async function handleExport() {
-    if (!session?.accessToken) {
+    if (!session) {
       router.replace("/login");
       return;
     }

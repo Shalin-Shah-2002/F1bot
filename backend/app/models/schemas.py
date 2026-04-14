@@ -1,7 +1,27 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+AUTH_PASSWORD_MIN_LENGTH = 10
+AUTH_PASSWORD_MAX_LENGTH = 128
+
+
+def _validate_auth_password(value: str) -> str:
+    if any(char.isspace() for char in value):
+        raise ValueError("Password must not contain whitespace.")
+
+    has_lower = any(char.islower() for char in value)
+    has_upper = any(char.isupper() for char in value)
+    has_digit = any(char.isdigit() for char in value)
+    has_symbol = any(not char.isalnum() for char in value)
+
+    if not all((has_lower, has_upper, has_digit, has_symbol)):
+        raise ValueError(
+            "Password must include at least one uppercase letter, one lowercase letter, one number, and one symbol."
+        )
+
+    return value
 
 
 def _normalize_string_list(value: list[str] | str | None) -> list[str]:
@@ -61,8 +81,13 @@ LeadStatus = Literal["new", "contacted", "qualified", "ignored"]
 
 
 class LoginRequest(BaseModel):
-    email: str = Field(min_length=3)
-    password: str = Field(min_length=3)
+    email: EmailStr
+    password: str = Field(min_length=AUTH_PASSWORD_MIN_LENGTH, max_length=AUTH_PASSWORD_MAX_LENGTH)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password_strength(cls, value: str) -> str:
+        return _validate_auth_password(value)
 
 
 class LoginResponse(BaseModel):
@@ -72,9 +97,7 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
 
 
-class RegisterRequest(BaseModel):
-    email: str = Field(min_length=3)
-    password: str = Field(min_length=6)
+class RegisterRequest(LoginRequest):
     full_name: str | None = Field(default=None, max_length=120)
 
 
@@ -83,6 +106,11 @@ class RegisterResponse(BaseModel):
     email: str
     access_token: str
     token_type: str = "bearer"
+
+
+class SessionResponse(BaseModel):
+    user_id: str
+    email: str
 
 
 class BusinessProfile(BaseModel):
