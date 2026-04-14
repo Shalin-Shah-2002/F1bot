@@ -1,3 +1,5 @@
+import csv
+from io import StringIO
 from uuid import uuid4
 
 from app.core.config import get_settings
@@ -12,6 +14,8 @@ from app.models.schemas import (
 from app.repositories.leads_repository import LeadsRepository
 from app.services.gemini_service import GeminiLeadScorer
 from app.services.reddit_service import RedditLeadCollector
+
+CSV_FORMULA_PREFIXES = ("=", "+", "-", "@")
 
 
 class LeadsController:
@@ -74,22 +78,31 @@ class LeadsController:
             "qualification_reason",
             "suggested_outreach",
         ]
-        rows = [",".join(header)]
+        output = StringIO()
+        writer = csv.writer(output, lineterminator="\n")
+        writer.writerow(header)
 
         for lead in leads:
-            values = [
-                lead.id,
-                lead.status,
-                lead.post.url,
-                lead.post.subreddit,
-                str(lead.lead_score),
-                self._csv_escape(lead.qualification_reason),
-                self._csv_escape(lead.suggested_outreach),
-            ]
-            rows.append(",".join(values))
+            writer.writerow(
+                [
+                    self._csv_safe_cell(lead.id),
+                    self._csv_safe_cell(lead.status),
+                    self._csv_safe_cell(lead.post.url),
+                    self._csv_safe_cell(lead.post.subreddit),
+                    self._csv_safe_cell(lead.lead_score),
+                    self._csv_safe_cell(lead.qualification_reason),
+                    self._csv_safe_cell(lead.suggested_outreach),
+                ]
+            )
 
-        return "\n".join(rows)
+        csv_output = output.getvalue()
+        if csv_output.endswith("\n"):
+            return csv_output[:-1]
+        return csv_output
 
-    def _csv_escape(self, value: str) -> str:
-        escaped = value.replace('"', '""')
-        return f'"{escaped}"'
+    def _csv_safe_cell(self, value: object) -> str:
+        text = str(value)
+        stripped = text.lstrip()
+        if stripped and stripped[0] in CSV_FORMULA_PREFIXES:
+            return f"'{text}"
+        return text

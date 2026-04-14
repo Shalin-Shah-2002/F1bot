@@ -37,6 +37,7 @@ The repo includes a FastAPI backend and a Next.js frontend dashboard.
 - [11. Known Limitations](#11-known-limitations)
 - [12. Troubleshooting](#12-troubleshooting)
 - [13. Related Docs](#13-related-docs)
+- [14. Build In Public And Contribute](#14-build-in-public-and-contribute)
 
 ## 1. Project Overview
 
@@ -47,7 +48,7 @@ The repo includes a FastAPI backend and a Next.js frontend dashboard.
 3. Reddit post discovery and candidate ranking.
 4. AI-assisted lead scoring and outreach suggestion generation.
 5. Lead inbox management with status tracking.
-6. CSV export for outbound workflows.
+6. CSV export for outbound workflows (including formula-safe CSV sanitization).
 7. Runtime configuration visibility in the UI.
 
 ### Tech stack
@@ -69,7 +70,7 @@ The repo includes a FastAPI backend and a Next.js frontend dashboard.
 ### High-level flow
 
 1. User registers or logs in.
-2. Frontend stores session token in localStorage.
+2. Backend sets auth cookies (httpOnly access token + CSRF token cookie).
 3. User configures profile context.
 4. User triggers scan from frontend.
 5. Backend collects candidate posts from Reddit.
@@ -82,11 +83,17 @@ The repo includes a FastAPI backend and a Next.js frontend dashboard.
 - Supabase mode:
 	- enabled when `SUPABASE_AUTH_ENABLED=true` (or inferred true outside dev-like envs),
 	- `/api/auth/login` and `/api/auth/register` use Supabase auth APIs,
-	- protected routes validate Bearer JWT using Supabase `auth.get_user(token)`.
+	- protected routes validate token using Supabase `auth.get_user(token)`.
 - Local fallback mode:
 	- used for development when Supabase auth is disabled,
 	- auth endpoints return demo tokens prefixed with `demo-token-`,
 	- protected routes derive local user id from that token format.
+
+Authentication transport options:
+
+- Browser clients use cookie-based auth (`httpOnly` access token cookie).
+- API/script clients can still send `Authorization: Bearer <access_token>`.
+- Cookie-authenticated mutating requests require `X-CSRF-Token` matching the CSRF cookie.
 
 ### Startup validation
 
@@ -135,7 +142,7 @@ Backend startup fails fast when auth mode and configuration are inconsistent (fo
 - `app/core/scan_limits.py`
 	- enforces per-user scan rate limit and daily quota.
 - `app/api/dependencies.py`
-	- enforces Bearer token auth,
+	- enforces cookie-or-Bearer auth,
 	- resolves user identity in Supabase or local fallback mode.
 - `app/controllers/*`
 	- orchestrate profile/leads/auth workflows.
@@ -196,8 +203,8 @@ Defaults: 6 per 60-second window, 200 scans/day per user.
 ### 5.1 Frontend route map
 
 - `/` -> redirects to `/login`
-- `/login` -> login form + session save
-- `/register` -> registration form + session save
+- `/login` -> login form + cookie session setup
+- `/register` -> registration form + cookie session setup
 - `/profile` -> business profile editor
 - `/scan` -> manual lead scan and immediate result cards
 - `/leads` -> lead inbox with status filtering
@@ -207,8 +214,10 @@ Defaults: 6 per 60-second window, 200 scans/day per user.
 
 ### 5.2 Session handling
 
-- Session is stored in browser localStorage (`f1bot-session`).
-- API client automatically injects `Authorization: Bearer <access_token>` for protected routes.
+- Browser auth uses cookies (`httpOnly` access token + CSRF token cookie).
+- Frontend hydrates session state via `/api/auth/session` and keeps only non-sensitive in-memory UI session data.
+- API client includes cookies (`credentials: include`) and sends `X-CSRF-Token` for mutating requests.
+- `/api/auth/logout` clears auth cookies server-side.
 - Missing/invalid session redirects the user to login pages in protected UI flows.
 
 ### 5.3 Design system notes
@@ -258,16 +267,27 @@ All endpoints are under backend base URL (default: `http://localhost:8000`).
 }
 ```
 
+Note:
+
+- Browser clients should use cookie session auth and not store raw tokens in localStorage.
+
 ### 6.2 Protected endpoints
 
-All endpoints below require:
+Auth for protected endpoints:
+
+- Browser clients: auth cookies are used automatically.
+- API/script clients: use `Authorization: Bearer <access_token>`.
+
+For cookie-based auth, mutating requests (`POST`, `PUT`, `PATCH`, `DELETE`) must include:
 
 ```http
-Authorization: Bearer <access_token>
+X-CSRF-Token: <csrf_token_cookie_value>
 ```
 
 | Method | Path | Description |
 | --- | --- | --- |
+| GET | `/api/auth/session` | get authenticated session identity |
+| POST | `/api/auth/logout` | clear auth cookies (requires CSRF for cookie auth) |
 | GET | `/api/health` | health + environment/config status |
 | GET | `/api/settings` | runtime config summary |
 | GET | `/api/profile` | get current user profile (auto-creates default if missing) |
@@ -386,6 +406,7 @@ pytest -q
 Current test files:
 
 - `backend/tests/test_auth_scan_regression.py`
+- `backend/tests/test_leads_csv_export.py`
 - `backend/tests/test_leads_repository.py`
 
 ## 10. Production Deployment Notes
@@ -417,10 +438,18 @@ Use this checklist before production go-live:
 
 ### Protected endpoint returns 401
 
-- Cause: missing or invalid Bearer token.
+- Cause: missing or invalid auth credentials (cookie session and/or Bearer token).
 - Fix:
-	- login/register again and confirm frontend session is saved,
-	- include `Authorization: Bearer <token>` in API requests.
+	- login/register again to refresh auth cookies,
+	- confirm frontend and backend origins are configured correctly,
+	- for API clients, include `Authorization: Bearer <token>`.
+
+### Protected mutating request returns 403
+
+- Cause: missing/invalid CSRF header for cookie-authenticated `POST`, `PUT`, `PATCH`, or `DELETE`.
+- Fix:
+	- ensure request sends `X-CSRF-Token` and it matches the `f1bot_csrf_token` cookie,
+	- refresh session and retry if CSRF token is stale.
 
 ### Lead scan falls back to sample posts
 
@@ -446,3 +475,23 @@ Use this checklist before production go-live:
 	- `docs/COMPETITOR_FEATURES.md`
 	- `docs/FEATURE_COMPARISON.md`
 	- `docs/BACKEND_API_PLAN.md`
+
+## 14. Build In Public And Contribute
+
+I am building this Reddit lead generation platform not only to ship a project, but also to continuously improve engineering quality. I actively review and harden the backend for reliability, trust, and production-grade behavior while learning in public.
+
+Code reviews help me understand exactly what the current implementation is doing and what can be improved next. If you want to join this improvement journey, contributions are welcome.
+
+How to contribute:
+
+1. Open an issue first so we align on the change.
+2. Submit a PR linked to that issue.
+3. I will review your PR and provide feedback.
+4. Strong, consistent contributions may be invited as collaborator access.
+
+Contact:
+
+- Email: `2002shalin@gmail.com`
+- Website: `https://shalinshah.tech`
+
+Let's build something we can confidently call production-grade.
