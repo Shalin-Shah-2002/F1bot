@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Literal
 
 from app.core.constants import (
     DEFAULT_AUTH_LOCKOUT_BASE_SECONDS,
@@ -12,6 +12,8 @@ from app.core.constants import (
     DEFAULT_APP_NAME,
     DEFAULT_FRONTEND_ORIGIN,
     DEFAULT_GEMINI_MODEL_LITE,
+    DEFAULT_RATE_LIMIT_STORE,
+    DEFAULT_REDIS_KEY_PREFIX,
     DEFAULT_REDDIT_USER_AGENT,
     DEFAULT_SCAN_DAILY_QUOTA,
     DEFAULT_SCAN_RATE_LIMIT_PER_MINUTE,
@@ -25,6 +27,9 @@ from app.core.constants import (
     ENV_AUTH_RATE_LIMIT_PER_IDENTITY,
     ENV_AUTH_RATE_LIMIT_PER_IP,
     ENV_AUTH_RATE_LIMIT_WINDOW_SECONDS,
+    ENV_RATE_LIMIT_STORE,
+    ENV_REDIS_KEY_PREFIX,
+    ENV_REDIS_URL,
     ENV_TRUSTED_PROXY_CIDRS,
     ENV_SUPABASE_ANON_KEY,
     ENV_SUPABASE_URL,
@@ -123,6 +128,15 @@ class Settings(BaseSettings):
         int,
         Field(validation_alias=ENV_AUTH_LOCKOUT_MAX_SECONDS, ge=1, le=86400),
     ] = DEFAULT_AUTH_LOCKOUT_MAX_SECONDS
+    rate_limit_store: Annotated[
+        Literal["memory", "redis"],
+        Field(validation_alias=ENV_RATE_LIMIT_STORE),
+    ] = DEFAULT_RATE_LIMIT_STORE
+    redis_url: Annotated[str | None, Field(validation_alias=ENV_REDIS_URL)] = None
+    redis_key_prefix: Annotated[
+        str,
+        Field(validation_alias=ENV_REDIS_KEY_PREFIX, min_length=1),
+    ] = DEFAULT_REDIS_KEY_PREFIX
     trusted_proxy_cidrs: Annotated[
         list[str],
         Field(validation_alias=ENV_TRUSTED_PROXY_CIDRS),
@@ -168,6 +182,19 @@ class Settings(BaseSettings):
             raise RuntimeError(
                 "Local/demo auth fallback is disabled. "
                 "Set LOCAL_AUTH_FALLBACK_ENABLED=true only for local/dev/test usage."
+            )
+
+    def validate_rate_limit_configuration(self) -> None:
+        if self.rate_limit_store == "redis" and not self.redis_url:
+            raise RuntimeError(
+                "RATE_LIMIT_STORE is set to redis but REDIS_URL is missing. "
+                "Set REDIS_URL or choose RATE_LIMIT_STORE=memory for local/dev/test only."
+            )
+
+        if self.rate_limit_store == "memory" and not self.is_local_environment():
+            raise RuntimeError(
+                "In-memory rate limiting is disabled outside local/dev/test environments. "
+                "Set RATE_LIMIT_STORE=redis."
             )
 
     model_config = SettingsConfigDict(

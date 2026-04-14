@@ -1,4 +1,10 @@
-from app.core.client_ip import UNKNOWN_REMOTE_IP, _resolve_client_ip
+import pytest
+
+from app.core.client_ip import (
+    UNKNOWN_REMOTE_IP,
+    _resolve_client_ip,
+    validate_trusted_proxy_startup_configuration,
+)
 
 
 def test_returns_peer_ip_when_trusted_proxy_list_is_empty() -> None:
@@ -49,3 +55,26 @@ def test_invalid_trusted_proxy_entries_are_ignored() -> None:
     )
 
     assert resolved == "198.51.100.8"
+
+
+def test_startup_validation_requires_trusted_proxies_for_proxied_envs() -> None:
+    with pytest.raises(RuntimeError, match="TRUSTED_PROXY_CIDRS must be configured"):
+        validate_trusted_proxy_startup_configuration(
+            app_env="production",
+            trusted_proxy_cidrs=[],
+        )
+
+
+def test_startup_validation_rejects_invalid_trusted_proxy_cidrs() -> None:
+    with pytest.raises(RuntimeError, match="contains invalid entries"):
+        validate_trusted_proxy_startup_configuration(
+            app_env="production",
+            trusted_proxy_cidrs=["not-a-cidr"],
+        )
+
+
+def test_startup_validation_allows_non_proxied_env_without_trusted_proxy_cidrs() -> None:
+    validate_trusted_proxy_startup_configuration(
+        app_env="development",
+        trusted_proxy_cidrs=[],
+    )
