@@ -508,6 +508,8 @@ Add these repository secrets before running the workflow:
 
 Use `backend/.env.production.example` as the template for `BACKEND_ENV_FILE`, then fill in real production secrets.
 
+Important: `TRUSTED_PROXY_CIDRS` must be a JSON array string (for example `["172.16.0.0/12","127.0.0.1/32"]`) when `APP_ENV=production`.
+
 ### 14.2 VM Prerequisites
 
 1. Docker Engine installed.

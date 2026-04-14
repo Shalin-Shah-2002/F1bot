@@ -37,6 +37,14 @@ else
 fi
 
 cd "$DEPLOY_DIR"
+
+# Persist the image tag so manual compose restarts do not try to pull defaults.
+if grep -q '^BACKEND_IMAGE=' .env; then
+  sed -i "s|^BACKEND_IMAGE=.*|BACKEND_IMAGE=${IMAGE_TAG}|" .env
+else
+  printf "\nBACKEND_IMAGE=%s\n" "$IMAGE_TAG" >> .env
+fi
+
 BACKEND_IMAGE="$IMAGE_TAG" docker compose up -d --remove-orphans
 
 # Keep host disk usage bounded.
