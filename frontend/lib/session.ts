@@ -8,9 +8,13 @@ interface SessionPayload {
   email?: unknown;
 }
 
-const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:8000"
-).replace(/\/$/, "");
+const configuredApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:8000";
+const shouldUseProxy =
+  typeof window !== "undefined" &&
+  window.location.protocol === "https:" &&
+  configuredApiBaseUrl.startsWith("http://");
+
+const API_BASE_URL = (shouldUseProxy ? "/backend" : configuredApiBaseUrl).replace(/\/$/, "");
 const CSRF_COOKIE_NAME = "f1bot_csrf_token";
 
 let cachedSession: SessionState | null = null;

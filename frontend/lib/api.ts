@@ -118,9 +118,13 @@ interface FastApiErrorPayload {
   detail?: string | FastApiValidationError[];
 }
 
-const API_BASE_URL = (
-  process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:8000"
-).replace(/\/$/, "");
+const configuredApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:8000";
+const shouldUseProxy =
+  typeof window !== "undefined" &&
+  window.location.protocol === "https:" &&
+  configuredApiBaseUrl.startsWith("http://");
+
+const API_BASE_URL = (shouldUseProxy ? "/backend" : configuredApiBaseUrl).replace(/\/$/, "");
 const CSRF_HEADER_NAME = "X-CSRF-Token";
 
 function toHeaderObject(headers?: HeadersInit): Record<string, string> {
