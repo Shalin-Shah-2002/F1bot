@@ -118,12 +118,9 @@ interface FastApiErrorPayload {
   detail?: string | FastApiValidationError[];
 }
 
-const processEnv =
-  typeof globalThis === "object" && "process" in globalThis
-    ? (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
-    : undefined;
-
-const API_BASE_URL = processEnv?.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:8000";
+const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:8000"
+).replace(/\/$/, "");
 const CSRF_HEADER_NAME = "X-CSRF-Token";
 
 function toHeaderObject(headers?: HeadersInit): Record<string, string> {

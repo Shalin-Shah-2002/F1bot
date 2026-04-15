@@ -8,12 +8,9 @@ interface SessionPayload {
   email?: unknown;
 }
 
-const processEnv =
-  typeof globalThis === "object" && "process" in globalThis
-    ? (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env
-    : undefined;
-
-const API_BASE_URL = processEnv?.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:8000";
+const API_BASE_URL = (
+  process.env.NEXT_PUBLIC_API_BASE_URL?.trim() || "http://localhost:8000"
+).replace(/\/$/, "");
 const CSRF_COOKIE_NAME = "f1bot_csrf_token";
 
 let cachedSession: SessionState | null = null;
