@@ -30,11 +30,16 @@ jobs:
 
       - name: Validate required secrets
         shell: bash
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GCP_ZONE: ${{ secrets.GCP_ZONE }}
+          BACKEND_ENV_FILE: ${{ secrets.BACKEND_ENV_FILE }}
         run: |
-          [[ -n "${{ secrets.GCP_SA_KEY }}" ]] || { echo "Missing GCP_SA_KEY secret"; exit 1; }
-          [[ -n "${{ secrets.GCP_PROJECT_ID }}" ]] || { echo "Missing GCP_PROJECT_ID secret"; exit 1; }
-          [[ -n "${{ secrets.GCP_ZONE }}" ]] || { echo "Missing GCP_ZONE secret"; exit 1; }
-          [[ -n "${{ secrets.BACKEND_ENV_FILE }}" ]] || { echo "Missing BACKEND_ENV_FILE secret"; exit 1; }
+          [[ -n "${GCP_SA_KEY:-}" ]] || { echo "Missing GCP_SA_KEY secret"; exit 1; }
+          [[ -n "${GCP_PROJECT_ID:-}" ]] || { echo "Missing GCP_PROJECT_ID secret"; exit 1; }
+          [[ -n "${GCP_ZONE:-}" ]] || { echo "Missing GCP_ZONE secret"; exit 1; }
+          [[ -n "${BACKEND_ENV_FILE:-}" ]] || { echo "Missing BACKEND_ENV_FILE secret"; exit 1; }
 
       - name: Build backend image
         run: docker build -t "${IMAGE_TAG}" backend
@@ -44,10 +49,10 @@ jobs:
 
       - name: Create runtime env file from secret
         shell: bash
+        env:
+          BACKEND_ENV_FILE: ${{ secrets.BACKEND_ENV_FILE }}
         run: |
-          cat > f1bot-backend.env <<'EOF'
-          ${{ secrets.BACKEND_ENV_FILE }}
-          EOF
+          printf '%s\n' "$BACKEND_ENV_FILE" > f1bot-backend.env
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
