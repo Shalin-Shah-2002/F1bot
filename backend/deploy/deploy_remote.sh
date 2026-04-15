@@ -12,6 +12,17 @@ TMP_IMAGE="${TMP_IMAGE:-/tmp/f1bot-backend-image.tar.gz}"
 TMP_COMPOSE="${TMP_COMPOSE:-/tmp/docker-compose.prod.yml}"
 TMP_ENV="${TMP_ENV:-/tmp/f1bot-backend.env}"
 
+DOCKER_CMD=(docker)
+if ! docker info >/dev/null 2>&1; then
+  if sudo -n true >/dev/null 2>&1; then
+    DOCKER_CMD=(sudo docker)
+  else
+    echo "Docker socket is not accessible for this SSH user."
+    echo "Add the user to the docker group or configure passwordless sudo."
+    exit 1
+  fi
+fi
+
 mkdir -p "$DEPLOY_DIR"
 
 if [[ -f "$TMP_COMPOSE" ]]; then
@@ -29,7 +40,7 @@ else
 fi
 
 if [[ -f "$TMP_IMAGE" ]]; then
-  gunzip -c "$TMP_IMAGE" | docker load
+  gunzip -c "$TMP_IMAGE" | "${DOCKER_CMD[@]}" load
   rm -f "$TMP_IMAGE"
 else
   echo "Missing $TMP_IMAGE"
@@ -45,9 +56,9 @@ else
   printf "\nBACKEND_IMAGE=%s\n" "$IMAGE_TAG" >> .env
 fi
 
-BACKEND_IMAGE="$IMAGE_TAG" docker compose up -d --remove-orphans
+BACKEND_IMAGE="$IMAGE_TAG" "${DOCKER_CMD[@]}" compose up -d --remove-orphans
 
 # Keep host disk usage bounded.
-docker image prune -f >/dev/null 2>&1 || true
+"${DOCKER_CMD[@]}" image prune -f >/dev/null 2>&1 || true
 
 echo "Deployment complete with image: $IMAGE_TAG"

@@ -23,6 +23,7 @@ jobs:
     env:
       IMAGE_TAG: f1bot-backend:${{ github.sha }}
       GCP_INSTANCE: shalin-e2-gcp
+      REMOTE_USER: shalinshah
       CLOUDSDK_CORE_DISABLE_PROMPTS: "1"
       REMOTE_STAGING_DIR: /tmp/f1bot-cicd-${{ github.run_id }}-${{ github.run_attempt }}
 
@@ -68,7 +69,7 @@ jobs:
 
       - name: Prepare remote staging directory
         run: |
-          gcloud compute ssh "${GCP_INSTANCE}" \
+          gcloud compute ssh "${REMOTE_USER}@${GCP_INSTANCE}" \
             --quiet \
             --zone "${{ secrets.GCP_ZONE }}" \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
@@ -84,11 +85,11 @@ jobs:
             backend/docker-compose.prod.yml \
             backend/deploy/deploy_remote.sh \
             f1bot-backend.env \
-            "${GCP_INSTANCE}:${REMOTE_STAGING_DIR}/"
+            "${REMOTE_USER}@${GCP_INSTANCE}:${REMOTE_STAGING_DIR}/"
 
       - name: Deploy to VM using Docker Compose
         run: |
-          gcloud compute ssh "${GCP_INSTANCE}" \
+          gcloud compute ssh "${REMOTE_USER}@${GCP_INSTANCE}" \
             --quiet \
             --zone "${{ secrets.GCP_ZONE }}" \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
