@@ -8,9 +8,9 @@ fi
 
 IMAGE_TAG="$1"
 DEPLOY_DIR="${DEPLOY_DIR:-$HOME/f1bot-backend}"
-TMP_IMAGE="/tmp/f1bot-backend-image.tar.gz"
-TMP_COMPOSE="/tmp/docker-compose.prod.yml"
-TMP_ENV="/tmp/f1bot-backend.env"
+TMP_IMAGE="${TMP_IMAGE:-/tmp/f1bot-backend-image.tar.gz}"
+TMP_COMPOSE="${TMP_COMPOSE:-/tmp/docker-compose.prod.yml}"
+TMP_ENV="${TMP_ENV:-/tmp/f1bot-backend.env}"
 
 mkdir -p "$DEPLOY_DIR"
 

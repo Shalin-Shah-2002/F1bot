@@ -24,6 +24,7 @@ jobs:
       IMAGE_TAG: f1bot-backend:${{ github.sha }}
       GCP_INSTANCE: shalin-e2-gcp
       CLOUDSDK_CORE_DISABLE_PROMPTS: "1"
+      REMOTE_STAGING_DIR: /tmp/f1bot-cicd-${{ github.run_id }}-${{ github.run_attempt }}
 
     steps:
       - name: Checkout repository
@@ -65,6 +66,14 @@ jobs:
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
+      - name: Prepare remote staging directory
+        run: |
+          gcloud compute ssh "${GCP_INSTANCE}" \
+            --quiet \
+            --zone "${{ secrets.GCP_ZONE }}" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --command "mkdir -p '${REMOTE_STAGING_DIR}'"
+
       - name: Copy deployment bundle to VM
         run: |
           gcloud compute scp \
@@ -75,7 +84,7 @@ jobs:
             backend/docker-compose.prod.yml \
             backend/deploy/deploy_remote.sh \
             f1bot-backend.env \
-            "${GCP_INSTANCE}:/tmp/"
+            "${GCP_INSTANCE}:${REMOTE_STAGING_DIR}/"
 
       - name: Deploy to VM using Docker Compose
         run: |
@@ -83,4 +92,4 @@ jobs:
             --quiet \
             --zone "${{ secrets.GCP_ZONE }}" \
             --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --command "chmod +x /tmp/deploy_remote.sh && /tmp/deploy_remote.sh ${IMAGE_TAG}"
+            --command "chmod +x '${REMOTE_STAGING_DIR}/deploy_remote.sh' && TMP_IMAGE='${REMOTE_STAGING_DIR}/f1bot-backend-image.tar.gz' TMP_COMPOSE='${REMOTE_STAGING_DIR}/docker-compose.prod.yml' TMP_ENV='${REMOTE_STAGING_DIR}/f1bot-backend.env' '${REMOTE_STAGING_DIR}/deploy_remote.sh' '${IMAGE_TAG}' && rm -rf '${REMOTE_STAGING_DIR}'"
