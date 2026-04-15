@@ -118,6 +118,7 @@ def test_scan_rate_limit_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
         self: RedditLeadCollector,
         request: object,
         seen_post_ids: set[str] | None = None,
+        allow_sample_fallback: bool = True,
     ) -> list[object]:
         return []
 
@@ -150,6 +151,7 @@ def test_scan_daily_quota_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
         self: RedditLeadCollector,
         request: object,
         seen_post_ids: set[str] | None = None,
+        allow_sample_fallback: bool = True,
     ) -> list[object]:
         return []
 
@@ -270,6 +272,28 @@ def test_settings_parse_trusted_proxy_cidrs_from_csv() -> None:
     )
 
     assert settings.trusted_proxy_cidrs == ["10.0.0.0/8", "192.168.0.10"]
+
+
+def test_settings_sample_leads_fallback_defaults_and_override() -> None:
+    from app.core.config import Settings
+
+    local_settings = Settings(
+        _env_file=None,
+        APP_ENV="development",
+    )
+    production_settings = Settings(
+        _env_file=None,
+        APP_ENV="production",
+    )
+    production_override = Settings(
+        _env_file=None,
+        APP_ENV="production",
+        SAMPLE_LEADS_FALLBACK_ENABLED="true",
+    )
+
+    assert local_settings.use_sample_leads_fallback() is True
+    assert production_settings.use_sample_leads_fallback() is False
+    assert production_override.use_sample_leads_fallback() is True
 
 
 def test_settings_require_redis_url_for_redis_rate_limit_store() -> None:

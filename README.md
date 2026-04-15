@@ -350,6 +350,7 @@ Allowed status values:
 | REDDIT_CLIENT_ID | No | Optional for authenticated Reddit path |
 | REDDIT_CLIENT_SECRET | No | Optional for authenticated Reddit path |
 | REDDIT_USER_AGENT | No | Reddit user agent |
+| SAMPLE_LEADS_FALLBACK_ENABLED | No | Forces demo sample leads fallback on/off (`true`/`false`). If unset, defaults to enabled in local/dev/test and disabled otherwise. |
 | SUPABASE_URL | Conditionally required | Required when Supabase auth is enabled |
 | SUPABASE_ANON_KEY | Conditionally required | Required when Supabase auth is enabled |
 | SUPABASE_SERVICE_ROLE_KEY | No | Optional; admin/background tasks only |
@@ -419,8 +420,9 @@ Use this checklist before production go-live:
 3. Provide valid `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
 4. Configure `FRONTEND_ORIGIN` to your deployed frontend domain.
 5. Configure `NEXT_PUBLIC_API_BASE_URL` to deployed backend URL.
-6. Run Supabase SQL schema from `backend/SUPABASE_SETUP.md`.
-7. Ensure secrets are injected via secure runtime environment, not committed files.
+6. Keep `SAMPLE_LEADS_FALLBACK_ENABLED=false` for production.
+7. Run Supabase SQL schema from `backend/SUPABASE_SETUP.md`.
+8. Ensure secrets are injected via secure runtime environment, not committed files.
 
 ## 11. Known Limitations
 
@@ -458,6 +460,7 @@ Use this checklist before production go-live:
 - Fix:
 	- provide valid Reddit credentials,
 	- verify network access to Reddit APIs,
+	- ensure `SAMPLE_LEADS_FALLBACK_ENABLED=false` in production,
 	- check backend logs for fallback warnings.
 
 ### AI scoring not active

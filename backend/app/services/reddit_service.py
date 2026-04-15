@@ -67,6 +67,7 @@ class RedditLeadCollector:
         self,
         request: LeadScanRequest,
         seen_post_ids: set[str] | None = None,
+        allow_sample_fallback: bool = True,
     ) -> list[CandidatePost]:
         """Fetch candidate posts, excluding any IDs in *seen_post_ids*."""
         seen = seen_post_ids or set()
@@ -124,6 +125,11 @@ class RedditLeadCollector:
         if unique_posts:
             return unique_posts[:max_candidates]
 
+        if not allow_sample_fallback:
+            logger.warning("No Reddit posts found from live search; sample fallback is disabled.")
+            return []
+
+        logger.warning("No Reddit posts found from live search; returning sample fallback posts.")
         # Last-resort: return sample posts that are not already seen
         sample = self._sample_posts(request)
         return [p for p in sample if p.id not in seen] or sample

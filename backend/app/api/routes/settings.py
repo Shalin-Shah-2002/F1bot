@@ -14,6 +14,7 @@ async def get_runtime_settings(_: str = Depends(get_authenticated_user_id)) -> d
         "environment": settings.app_env,
         "gemini_configured": bool(settings.gemini_api_key),
         "reddit_configured": bool(settings.reddit_client_id and settings.reddit_client_secret),
+        "sample_leads_fallback_enabled": settings.use_sample_leads_fallback(),
         "supabase_configured": supabase_configured,
         "supabase_auth_enabled": settings.use_supabase_auth(),
         "scan_rate_limit_per_minute": settings.scan_rate_limit_per_minute,

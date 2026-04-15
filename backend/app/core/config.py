@@ -45,6 +45,7 @@ from app.core.constants import (
     ENV_REDDIT_CLIENT_ID,
     ENV_REDDIT_CLIENT_SECRET,
     ENV_REDDIT_USER_AGENT,
+    ENV_SAMPLE_LEADS_FALLBACK_ENABLED,
     ENV_SUPABASE_AUTH_ENABLED,
     ERROR_AUTH_CONFIGURATION,
     SUPABASE_AUTH_DISABLED_ENVS,
@@ -81,6 +82,10 @@ class Settings(BaseSettings):
     reddit_client_id: Annotated[str | None, Field(validation_alias=ENV_REDDIT_CLIENT_ID)] = None
     reddit_client_secret: Annotated[str | None, Field(validation_alias=ENV_REDDIT_CLIENT_SECRET)] = None
     reddit_user_agent: Annotated[str, Field(validation_alias=ENV_REDDIT_USER_AGENT)] = DEFAULT_REDDIT_USER_AGENT
+    sample_leads_fallback_enabled: Annotated[
+        bool | None,
+        Field(validation_alias=ENV_SAMPLE_LEADS_FALLBACK_ENABLED),
+    ] = None
 
     supabase_url: Annotated[str | None, Field(validation_alias=ENV_SUPABASE_URL)] = None
     supabase_anon_key: Annotated[str | None, Field(validation_alias=ENV_SUPABASE_ANON_KEY)] = None
@@ -159,6 +164,13 @@ class Settings(BaseSettings):
             return False
 
         return True
+
+    def use_sample_leads_fallback(self) -> bool:
+        if self.sample_leads_fallback_enabled is not None:
+            return self.sample_leads_fallback_enabled
+
+        # Keep demo sample leads in local/dev/test, disable them by default elsewhere.
+        return self.is_local_environment()
 
     def validate_auth_configuration(self) -> None:
         if self.use_supabase_auth():

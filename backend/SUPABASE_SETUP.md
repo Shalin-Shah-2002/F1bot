@@ -11,6 +11,7 @@ SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 SUPABASE_AUTH_ENABLED=true
 LOCAL_AUTH_FALLBACK_ENABLED=false
+SAMPLE_LEADS_FALLBACK_ENABLED=false
 ```
 
 Keep your existing app/reddit/gemini variables as-is.
@@ -21,6 +22,7 @@ set:
 ```env
 SUPABASE_AUTH_ENABLED=false
 LOCAL_AUTH_FALLBACK_ENABLED=true
+SAMPLE_LEADS_FALLBACK_ENABLED=true
 ```
 
 Local fallback auth no longer auto-enables from `APP_ENV` alone.

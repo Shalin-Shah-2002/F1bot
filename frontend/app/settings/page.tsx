@@ -97,6 +97,15 @@ export default function SettingsPage() {
 
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="brand-stat">
+                <p className="text-xs uppercase tracking-[0.14em] text-brand-burgundy/70">Sample Leads Fallback</p>
+                <p className="mt-1 text-base font-semibold text-brand-navy">
+                  {settings.sample_leads_fallback_enabled ? "Enabled" : "Disabled"}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="brand-stat">
                 <p className="text-xs uppercase tracking-[0.14em] text-brand-burgundy/70">Rate Limit / Minute</p>
                 <p className="mt-1 text-lg font-semibold text-brand-navy">{settings.scan_rate_limit_per_minute}</p>
               </div>

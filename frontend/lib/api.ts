@@ -94,6 +94,7 @@ export interface RuntimeSettingsResponse {
   environment: string;
   gemini_configured: boolean;
   reddit_configured: boolean;
+  sample_leads_fallback_enabled: boolean;
   supabase_configured: boolean;
   supabase_auth_enabled: boolean;
   scan_rate_limit_per_minute: number;

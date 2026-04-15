@@ -39,7 +39,9 @@ class LeadsController:
         seen_post_ids = self.repository.get_seen_post_ids(user_id)
 
         candidate_posts = await collector.fetch_candidate_posts(
-            payload, seen_post_ids=seen_post_ids
+            payload,
+            seen_post_ids=seen_post_ids,
+            allow_sample_fallback=settings.use_sample_leads_fallback(),
         )
         lead_insights = await scorer.score_posts(payload, candidate_posts)
 
