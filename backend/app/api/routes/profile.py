@@ -11,9 +11,16 @@ from app.repositories.profile_repository import ProfileRepository
 router = APIRouter(prefix="/api/profile", tags=["profile"])
 
 
-def _build_controller(access_token: str) -> ProfileController:
+def _build_controller(auth_context: AuthContext) -> ProfileController:
+    """Build a ProfileController wired to the right storage backend.
+
+    When Supabase auth is disabled (local / demo mode), ``get_supabase_user_client``
+    returns ``None`` and the repository falls back to the in-memory store.
+    When Supabase auth is enabled the client carries the user JWT for RLS and
+    we raise 500 if it could not be created.
+    """
     settings = get_settings()
-    client = get_supabase_user_client(access_token)
+    client = get_supabase_user_client(auth_context.access_token)
     if settings.use_supabase_auth() and client is None:
         raise HTTPException(status_code=500, detail=ERROR_AUTH_CONFIGURATION)
 
@@ -23,7 +30,7 @@ def _build_controller(access_token: str) -> ProfileController:
 
 @router.get("", response_model=BusinessProfile)
 async def get_profile(auth_context: AuthContext = Depends(get_authenticated_context)) -> BusinessProfile:
-    controller = _build_controller(auth_context.access_token)
+    controller = _build_controller(auth_context)
     return controller.get_or_create_profile(user_id=auth_context.user_id)
 
 
@@ -32,5 +39,5 @@ async def upsert_profile(
     payload: BusinessProfileUpsertRequest,
     auth_context: AuthContext = Depends(get_authenticated_context),
 ) -> BusinessProfile:
-    controller = _build_controller(auth_context.access_token)
+    controller = _build_controller(auth_context)
     return controller.upsert_profile(user_id=auth_context.user_id, payload=payload)

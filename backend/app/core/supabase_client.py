@@ -41,7 +41,16 @@ def get_supabase_auth_client() -> Any | None:
 
 
 def get_supabase_user_client(access_token: str) -> Any | None:
-    """Creates a PostgREST client bound to an end-user JWT for RLS enforcement."""
+    """Creates a PostgREST client bound to an end-user JWT for RLS enforcement.
+
+    Returns ``None`` immediately when Supabase auth is disabled – demo/dev
+    tokens are not JWTs and must never reach PostgREST, which would cause a
+    JWT-parse 500 error.
+    """
+    # Guard: skip all Supabase I/O when auth is running in local/demo mode.
+    if not get_settings().use_supabase_auth():
+        return None
+
     token = access_token.strip()
     if not token:
         return None
