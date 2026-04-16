@@ -58,7 +58,8 @@ fi
 
 BACKEND_IMAGE="$IMAGE_TAG" "${DOCKER_CMD[@]}" compose up -d --remove-orphans
 
-# Keep host disk usage bounded.
-"${DOCKER_CMD[@]}" image prune -f >/dev/null 2>&1 || true
+# Keep host disk usage bounded on small VMs.
+"${DOCKER_CMD[@]}" image prune -af --filter "until=168h" >/dev/null 2>&1 || true
+"${DOCKER_CMD[@]}" builder prune -af --filter "until=168h" >/dev/null 2>&1 || true
 
 echo "Deployment complete with image: $IMAGE_TAG"

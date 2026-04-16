@@ -9,6 +9,9 @@ services:
       RATE_LIMIT_STORE: ${RATE_LIMIT_STORE:-redis}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    mem_limit: 640m
+    cpus: 0.75
+    pids_limit: 256
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     depends_on:
@@ -20,11 +23,30 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--appendfsync",
+        "everysec",
+        "--maxmemory",
+        "192mb",
+        "--maxmemory-policy",
+        "allkeys-lru"
+      ]
+    mem_limit: 256m
+    cpus: 0.25
+    pids_limit: 128
     volumes:
       - redis_data:/data
     healthcheck:
@@ -32,6 +54,11 @@ services:
       interval: 10s
       timeout: 3s
       retries: 10
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   redis_data:
