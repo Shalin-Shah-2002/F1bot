@@ -9,6 +9,7 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from app.core.constants import COMMENT_INTENT_FETCH_THRESHOLD
 from app.models.schemas import CandidatePost, LeadScanRequest
 
 try:
@@ -28,6 +29,14 @@ PUBLIC_SEARCH_CACHE_TTL_SECONDS = 60
 PUBLIC_SEARCH_MAX_RETRIES = 3
 PUBLIC_SEARCH_BASE_BACKOFF_SECONDS = 0.5
 REQUEST_TIMEOUT_SECONDS = 15
+
+MAX_QUERY_COMBINATIONS_PER_SCAN = 42
+MAX_COMMENT_FETCHES_PER_SCAN = 24
+SCAN_TIME_BUDGET_SECONDS = 45
+PUBLIC_SEARCH_LISTING_TIMEOUT_SECONDS = 8
+PUBLIC_SEARCH_LISTING_MAX_RETRIES = 2
+COMMENT_FETCH_TIMEOUT_SECONDS = 4
+COMMENT_FETCH_MAX_RETRIES = 1
 
 INTENT_SIGNALS = (
     "looking for",
@@ -113,11 +122,30 @@ class RedditLeadCollector:
         if not subreddits:
             subreddits = DEFAULT_SUBREDDITS
 
+        scan_deadline = time.monotonic() + SCAN_TIME_BUDGET_SECONDS
+        scan_budget = {
+            "queries": MAX_QUERY_COMBINATIONS_PER_SCAN,
+            "comments": MAX_COMMENT_FETCHES_PER_SCAN,
+        }
+
         # Try progressively wider time windows so repeat scans surface fresh posts.
         time_filters = ["week", "month", "year", "all"]
         all_posts: list[CandidatePost] = []
 
         for time_filter in time_filters:
+            if self._scan_deadline_exceeded(scan_deadline):
+                logger.info(
+                    "Stopping Reddit scan after %ss time budget.",
+                    SCAN_TIME_BUDGET_SECONDS,
+                )
+                break
+            if not self._has_query_budget(scan_budget):
+                logger.info(
+                    "Stopping Reddit scan after reaching query budget (%s combinations).",
+                    MAX_QUERY_COMBINATIONS_PER_SCAN,
+                )
+                break
+
             if self._has_credentials() and asyncpraw is not None:
                 posts = await self._fetch_with_authenticated_api(
                     subreddits=subreddits,
@@ -125,6 +153,8 @@ class RedditLeadCollector:
                     request_limit=request.limit,
                     max_candidates=max_candidates,
                     time_filter=time_filter,
+                    scan_budget=scan_budget,
+                    scan_deadline=scan_deadline,
                 )
                 if posts:
                     new_posts = [p for p in posts if p.id not in seen]
@@ -140,6 +170,8 @@ class RedditLeadCollector:
                 request_limit=request.limit,
                 max_candidates=max_candidates,
                 time_filter=time_filter,
+                scan_budget=scan_budget,
+                scan_deadline=scan_deadline,
             )
             new_posts = [p for p in posts if p.id not in seen]
             all_posts.extend(new_posts)
@@ -173,6 +205,8 @@ class RedditLeadCollector:
         request_limit: int,
         max_candidates: int,
         time_filter: str = "month",
+        scan_budget: dict[str, int] | None = None,
+        scan_deadline: float | None = None,
     ) -> list[CandidatePost]:
         if not self._has_credentials() or asyncpraw is None:
             return []
@@ -189,15 +223,26 @@ class RedditLeadCollector:
 
         try:
             for subreddit_name in subreddits:
+                if self._scan_deadline_exceeded(scan_deadline):
+                    return self._rank_collected_posts(collected, max_candidates)
+
                 subreddit = await reddit.subreddit(subreddit_name)
 
                 for keyword in keywords:
+                    if self._scan_deadline_exceeded(scan_deadline):
+                        return self._rank_collected_posts(collected, max_candidates)
+                    if not self._consume_query_budget(scan_budget):
+                        return self._rank_collected_posts(collected, max_candidates)
+
                     async for submission in subreddit.search(
                         keyword,
                         sort="new",          # "new" surfaces recent & varied posts
                         time_filter=time_filter,
                         limit=per_query_limit,
                     ):
+                        if self._scan_deadline_exceeded(scan_deadline):
+                            return self._rank_collected_posts(collected, max_candidates)
+
                         if getattr(submission, "stickied", False):
                             continue
 
@@ -217,7 +262,19 @@ class RedditLeadCollector:
 
                         # Fetch comments for posts with enough engagement so we can
                         # detect buyer-intent signals that appear only in threads.
-                        top_comments = await self._fetch_top_comments(url, num_comments)
+                        top_comments: list[str] = []
+                        if self._should_fetch_comments(
+                            num_comments=num_comments,
+                            scan_budget=scan_budget,
+                            scan_deadline=scan_deadline,
+                        ):
+                            self._consume_comment_budget(scan_budget)
+                            top_comments = await self._fetch_top_comments(
+                                url,
+                                num_comments,
+                                timeout_seconds=COMMENT_FETCH_TIMEOUT_SECONDS,
+                                max_retries=COMMENT_FETCH_MAX_RETRIES,
+                            )
 
                         if not self._is_keyword_match(title, body, keyword, top_comments):
                             continue
@@ -266,6 +323,8 @@ class RedditLeadCollector:
         request_limit: int,
         max_candidates: int,
         time_filter: str = "month",
+        scan_budget: dict[str, int] | None = None,
+        scan_deadline: float | None = None,
     ) -> list[CandidatePost]:
         if not subreddits:
             return []
@@ -274,16 +333,29 @@ class RedditLeadCollector:
         collected: dict[str, tuple[CandidatePost, float]] = {}
 
         for subreddit_name in subreddits:
+            if self._scan_deadline_exceeded(scan_deadline):
+                return self._rank_collected_posts(collected, max_candidates)
+
             for keyword in keywords:
+                if self._scan_deadline_exceeded(scan_deadline):
+                    return self._rank_collected_posts(collected, max_candidates)
+                if not self._consume_query_budget(scan_budget):
+                    return self._rank_collected_posts(collected, max_candidates)
+
                 listing = await asyncio.to_thread(
                     self._fetch_public_search_listing,
                     subreddit_name,
                     keyword,
                     per_query_limit,
                     time_filter,
+                    PUBLIC_SEARCH_LISTING_MAX_RETRIES,
+                    PUBLIC_SEARCH_LISTING_TIMEOUT_SECONDS,
                 )
 
                 for item in listing:
+                    if self._scan_deadline_exceeded(scan_deadline):
+                        return self._rank_collected_posts(collected, max_candidates)
+
                     post_data = item.get("data", {})
                     if not post_data or post_data.get("stickied"):
                         continue
@@ -305,9 +377,20 @@ class RedditLeadCollector:
 
                     # Fetch comments before the keyword gate so intent-only
                     # comment leads still pass through.
-                    top_comments = await asyncio.to_thread(
-                        self._fetch_top_comments_sync, url, num_comments
-                    )
+                    top_comments: list[str] = []
+                    if self._should_fetch_comments(
+                        num_comments=num_comments,
+                        scan_budget=scan_budget,
+                        scan_deadline=scan_deadline,
+                    ):
+                        self._consume_comment_budget(scan_budget)
+                        top_comments = await asyncio.to_thread(
+                            self._fetch_top_comments_sync,
+                            url,
+                            num_comments,
+                            COMMENT_FETCH_TIMEOUT_SECONDS,
+                            COMMENT_FETCH_MAX_RETRIES,
+                        )
 
                     if not self._is_keyword_match(title, body, keyword, top_comments):
                         continue
@@ -356,6 +439,8 @@ class RedditLeadCollector:
         keyword: str,
         limit: int,
         time_filter: str = "month",
+        max_retries: int = PUBLIC_SEARCH_MAX_RETRIES,
+        timeout_seconds: float = REQUEST_TIMEOUT_SECONDS,
     ) -> list[dict[str, Any]]:
         cache_key = f"{subreddit_name}|{keyword.lower()}|{limit}|{time_filter}"
         now = time.time()
@@ -370,8 +455,13 @@ class RedditLeadCollector:
         )
 
         user_agent = self.user_agent or "f1bot-local"
-        payload = self._request_json_with_retry(url=url, user_agent=user_agent)
-        if not payload:
+        payload = self._request_json_with_retry(
+            url=url,
+            user_agent=user_agent,
+            max_retries=max_retries,
+            timeout_seconds=timeout_seconds,
+        )
+        if not isinstance(payload, dict):
             return []
 
         children = payload.get("data", {}).get("children", [])
@@ -382,16 +472,24 @@ class RedditLeadCollector:
         self._public_search_cache[cache_key] = (now, children)
         return children
 
-    def _request_json_with_retry(self, url: str, user_agent: str) -> dict[str, Any] | None:
+    def _request_json_with_retry(
+        self,
+        url: str,
+        user_agent: str,
+        max_retries: int = PUBLIC_SEARCH_MAX_RETRIES,
+        timeout_seconds: float = REQUEST_TIMEOUT_SECONDS,
+    ) -> dict[str, Any] | list[Any] | None:
         request = urllib.request.Request(url, headers={"User-Agent": user_agent})
+        attempts = max(1, max_retries)
+        request_timeout = max(1.0, timeout_seconds)
 
-        for attempt in range(PUBLIC_SEARCH_MAX_RETRIES):
+        for attempt in range(attempts):
             try:
-                with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+                with urllib.request.urlopen(request, timeout=request_timeout) as response:
                     raw = response.read().decode("utf-8")
                 return json.loads(raw)
             except urllib.error.HTTPError as error:
-                should_retry = error.code in {429, 500, 502, 503, 504} and attempt < PUBLIC_SEARCH_MAX_RETRIES - 1
+                should_retry = error.code in {429, 500, 502, 503, 504} and attempt < attempts - 1
                 if should_retry:
                     retry_after = error.headers.get("Retry-After") if error.headers else None
                     time.sleep(self._retry_delay(attempt, retry_after))
@@ -399,7 +497,7 @@ class RedditLeadCollector:
                 logger.warning("Public Reddit search HTTP error for %s: %s", url, error)
                 return None
             except (urllib.error.URLError, TimeoutError) as error:
-                if attempt < PUBLIC_SEARCH_MAX_RETRIES - 1:
+                if attempt < attempts - 1:
                     time.sleep(self._retry_delay(attempt, None))
                     continue
                 logger.warning("Public Reddit search network error for %s: %s", url, error)
@@ -422,15 +520,32 @@ class RedditLeadCollector:
     # Comment fetching
     # ------------------------------------------------------------------
 
-    async def _fetch_top_comments(self, post_url: str, num_comments: int) -> list[str]:
+    async def _fetch_top_comments(
+        self,
+        post_url: str,
+        num_comments: int,
+        timeout_seconds: float = COMMENT_FETCH_TIMEOUT_SECONDS,
+        max_retries: int = COMMENT_FETCH_MAX_RETRIES,
+    ) -> list[str]:
         """Async wrapper — runs the blocking HTTP call on a thread so the event
         loop stays free during the network round-trip."""
-        from app.core.constants import COMMENT_INTENT_FETCH_THRESHOLD
         if num_comments < COMMENT_INTENT_FETCH_THRESHOLD:
             return []
-        return await asyncio.to_thread(self._fetch_top_comments_sync, post_url, num_comments)
+        return await asyncio.to_thread(
+            self._fetch_top_comments_sync,
+            post_url,
+            num_comments,
+            timeout_seconds,
+            max_retries,
+        )
 
-    def _fetch_top_comments_sync(self, post_url: str, num_comments: int) -> list[str]:
+    def _fetch_top_comments_sync(
+        self,
+        post_url: str,
+        num_comments: int,
+        timeout_seconds: float = COMMENT_FETCH_TIMEOUT_SECONDS,
+        max_retries: int = COMMENT_FETCH_MAX_RETRIES,
+    ) -> list[str]:
         """Fetch up to *_MAX_COMMENTS_TO_FETCH* top-level comment bodies for a post.
 
         Uses Reddit's public `<post_url>.json` endpoint (no auth required) so it
@@ -438,7 +553,6 @@ class RedditLeadCollector:
         to an empty list on any network or parse failure so the lead pipeline is
         never blocked by a comment-fetch error.
         """
-        from app.core.constants import COMMENT_INTENT_FETCH_THRESHOLD
         if num_comments < COMMENT_INTENT_FETCH_THRESHOLD:
             return []
 
@@ -446,7 +560,12 @@ class RedditLeadCollector:
         user_agent = self.user_agent or "f1bot-local"
 
         try:
-            payload = self._request_json_with_retry(url=json_url, user_agent=user_agent)
+            payload = self._request_json_with_retry(
+                url=json_url,
+                user_agent=user_agent,
+                max_retries=max_retries,
+                timeout_seconds=timeout_seconds,
+            )
         except Exception:
             return []
 
@@ -484,6 +603,51 @@ class RedditLeadCollector:
         ]
         for key in stale_keys:
             del self._public_search_cache[key]
+
+    def _scan_deadline_exceeded(self, scan_deadline: float | None) -> bool:
+        if scan_deadline is None:
+            return False
+        return time.monotonic() >= scan_deadline
+
+    def _has_query_budget(self, scan_budget: dict[str, int] | None) -> bool:
+        if scan_budget is None:
+            return True
+        return scan_budget.get("queries", 0) > 0
+
+    def _consume_query_budget(self, scan_budget: dict[str, int] | None) -> bool:
+        if scan_budget is None:
+            return True
+
+        remaining = scan_budget.get("queries", 0)
+        if remaining <= 0:
+            return False
+
+        scan_budget["queries"] = remaining - 1
+        return True
+
+    def _should_fetch_comments(
+        self,
+        num_comments: int,
+        scan_budget: dict[str, int] | None,
+        scan_deadline: float | None,
+    ) -> bool:
+        if num_comments < COMMENT_INTENT_FETCH_THRESHOLD:
+            return False
+        if self._scan_deadline_exceeded(scan_deadline):
+            return False
+        if scan_budget is None:
+            return True
+        return scan_budget.get("comments", 0) > 0
+
+    def _consume_comment_budget(self, scan_budget: dict[str, int] | None) -> None:
+        if scan_budget is None:
+            return
+
+        remaining = scan_budget.get("comments", 0)
+        if remaining <= 0:
+            return
+
+        scan_budget["comments"] = remaining - 1
 
     def _rank_collected_posts(
         self,

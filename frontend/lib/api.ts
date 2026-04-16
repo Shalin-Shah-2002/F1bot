@@ -127,6 +127,7 @@ const shouldUseProxy =
 
 const API_BASE_URL = (shouldUseProxy ? "/backend" : configuredApiBaseUrl).replace(/\/$/, "");
 const CSRF_HEADER_NAME = "X-CSRF-Token";
+const SCAN_REQUEST_TIMEOUT_MS = 90_000;
 
 function toHeaderObject(headers?: HeadersInit): Record<string, string> {
   if (!headers) {
@@ -147,6 +148,10 @@ function toHeaderObject(headers?: HeadersInit): Record<string, string> {
 function requiresCsrf(method?: string): boolean {
   const normalized = (method || "GET").toUpperCase();
   return normalized === "POST" || normalized === "PUT" || normalized === "PATCH" || normalized === "DELETE";
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 function buildCsrfHeader(method?: string): Record<string, string> {
@@ -223,7 +228,10 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
         ...toHeaderObject(init?.headers)
       }
     });
-  } catch {
+  } catch (error) {
+    if (isAbortError(error)) {
+      throw new Error("Scan timed out. Try fewer keywords/subreddits and run again.");
+    }
     throw new Error(`Unable to connect to API (${API_BASE_URL}).`);
   }
 
@@ -308,15 +316,23 @@ export async function saveProfile(payload: SaveProfileRequest): Promise<Business
 }
 
 export async function scanLeads(payload: LeadScanRequest): Promise<LeadScanResponse> {
-  const response = await authenticatedFetch("/api/leads/scan", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), SCAN_REQUEST_TIMEOUT_MS);
 
-  return parseResponse<LeadScanResponse>(response);
+  try {
+    const response = await authenticatedFetch("/api/leads/scan", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    return parseResponse<LeadScanResponse>(response);
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 export async function getLeads(status?: LeadStatus): Promise<LeadListResponse> {
