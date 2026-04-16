@@ -64,6 +64,11 @@ SUPABASE_AUTH_DISABLED_ENVS = ("development", "dev", "local", "test")
 
 # API-safe error messages
 ERROR_AUTH_CONFIGURATION = "Authentication service is not configured correctly."
+ERROR_ANON_KEY_IS_SERVICE_ROLE = (
+    "SUPABASE_ANON_KEY contains a service_role token. "
+    "This breaks least-privilege boundaries and must be fixed before startup. "
+    "Set SUPABASE_ANON_KEY to the `anon public` key from Supabase dashboard \u2192 Settings \u2192 API."
+)
 ERROR_AUTHENTICATION_FAILED = "Authentication failed."
 ERROR_TOKEN_INVALID = "Invalid or expired access token"
 ERROR_LOGIN_FAILED = "Login failed. Check credentials and try again."
