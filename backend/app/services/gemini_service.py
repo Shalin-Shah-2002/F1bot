@@ -12,6 +12,7 @@ from app.core.constants import (
     LEAD_SCAN_MIN_AI_CANDIDATES,
     NON_REFINED_MAX_SCORE,
     PROMPT_MAX_BUSINESS_CHARS,
+    PROMPT_MAX_COMMENT_CHARS,
     PROMPT_MAX_KEYWORD_CHARS,
     PROMPT_MAX_KEYWORDS,
     PROMPT_MAX_SNIPPET_CHARS,
@@ -74,6 +75,12 @@ class GeminiLeadScorer:
                 "upvotes": item.post.score,
                 "comments": item.post.num_comments,
                 "baseline_score": round(item.lead_score, 2),
+                # Include truncated comment snippets so the model can detect
+                # buyer-intent signals that only surface in comment threads.
+                "top_comment_snippets": [
+                    self._compact(c, PROMPT_MAX_COMMENT_CHARS)
+                    for c in item.post.top_comments[:3]
+                ],
             }
             for item in candidates
         ]

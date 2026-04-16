@@ -99,3 +99,8 @@ PROMPT_MAX_SNIPPET_CHARS = 220
 PROMPT_MAX_KEYWORD_CHARS = 32
 PROMPT_MAX_KEYWORDS = 8
 PROMPT_MAX_BUSINESS_CHARS = 320
+PROMPT_MAX_COMMENT_CHARS = 160  # per-comment truncation sent to Gemini
+
+# Comments are only fetched for posts with at least this many comments.
+# Below this threshold the post body alone is usually sufficient signal.
+COMMENT_INTENT_FETCH_THRESHOLD = 3

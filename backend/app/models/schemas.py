@@ -50,6 +50,9 @@ class CandidatePost(BaseModel):
     created_utc: datetime
     score: int
     num_comments: int
+    # Top-level comments fetched for high-activity posts.
+    # Used to detect buyer-intent signals that only appear in comment threads.
+    top_comments: list[str] = Field(default_factory=list)
 
 
 class LeadInsight(BaseModel):

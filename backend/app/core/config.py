@@ -1,3 +1,5 @@
+import base64
+import json
 from functools import lru_cache
 from typing import Annotated, Literal
 
@@ -47,11 +49,33 @@ from app.core.constants import (
     ENV_REDDIT_USER_AGENT,
     ENV_SAMPLE_LEADS_FALLBACK_ENABLED,
     ENV_SUPABASE_AUTH_ENABLED,
+    ERROR_ANON_KEY_IS_SERVICE_ROLE,
     ERROR_AUTH_CONFIGURATION,
     SUPABASE_AUTH_DISABLED_ENVS,
 )
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _jwt_role(token: str | None) -> str | None:
+    """Extract the `role` claim from a JWT payload without signature verification.
+
+    We only need the label embedded in the public payload segment; the signature
+    is irrelevant for this structural check.
+    Returns ``None`` if the token is absent or cannot be decoded.
+    """
+    if not token:
+        return None
+    parts = token.strip().split(".")
+    if len(parts) != 3:
+        return None
+    try:
+        # JWT payload is base64url-encoded; pad to a multiple of 4.
+        payload_b64 = parts[1] + "==" [: (4 - len(parts[1]) % 4) % 4]
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        return str(payload.get("role", "")) or None
+    except Exception:
+        return None
 
 
 def _normalize_env_string_list(value: list[str] | str | None) -> list[str]:
@@ -182,6 +206,11 @@ class Settings(BaseSettings):
             if missing_keys:
                 missing = ", ".join(missing_keys)
                 raise RuntimeError(f"{ERROR_AUTH_CONFIGURATION} Missing: {missing}")
+
+            # Reject service_role key used in the anon slot.
+            if _jwt_role(self.supabase_anon_key) == "service_role":
+                raise RuntimeError(ERROR_ANON_KEY_IS_SERVICE_ROLE)
+
             return
 
         if not self.is_local_environment():

@@ -42,6 +42,32 @@ INTENT_SIGNALS = (
     "help me",
 )
 
+# Stronger buyer-intent phrases that predominantly surface in comment threads.
+# These are high-precision — matching even one is a reliable purchase-intent signal.
+COMMENT_INTENT_SIGNALS = (
+    "looking for exactly this",
+    "this is exactly what i need",
+    "anyone recommend",
+    "can anyone recommend",
+    "does anyone know a tool",
+    "anyone know of a good",
+    "is there a tool that",
+    "is there an app that",
+    "is there a service that",
+    "have you tried",
+    "i would pay for",
+    "i'd pay for",
+    "willing to pay",
+    "looking to buy",
+    "ready to buy",
+    "where can i find",
+    "how do i find",
+    "any good alternatives",
+    "what do you use for",
+    "what's the best way to",
+    "what is the best way to",
+)
+
 LOW_INTENT_SIGNALS = (
     "progress pic",
     "before and after",
@@ -49,6 +75,12 @@ LOW_INTENT_SIGNALS = (
     "nsv",
     "weigh-in",
 )
+
+
+# Maximum number of top-level comments to fetch per post.
+_MAX_COMMENTS_TO_FETCH = 10
+# Per-comment character limit stored on CandidatePost.
+_MAX_COMMENT_BODY_CHARS = 500
 
 
 class RedditLeadCollector:
@@ -183,6 +215,13 @@ class RedditLeadCollector:
                         score = int(getattr(submission, "score", 0) or 0)
                         num_comments = int(getattr(submission, "num_comments", 0) or 0)
 
+                        # Fetch comments for posts with enough engagement so we can
+                        # detect buyer-intent signals that appear only in threads.
+                        top_comments = await self._fetch_top_comments(url, num_comments)
+
+                        if not self._is_keyword_match(title, body, keyword, top_comments):
+                            continue
+
                         candidate = CandidatePost(
                             id=post_id,
                             title=title,
@@ -193,6 +232,7 @@ class RedditLeadCollector:
                             created_utc=datetime.fromtimestamp(float(submission.created_utc), tz=timezone.utc),
                             score=score,
                             num_comments=num_comments,
+                            top_comments=top_comments,
                         )
 
                         relevance = self._score_keyword_match(
@@ -201,6 +241,7 @@ class RedditLeadCollector:
                             keyword=keyword,
                             score=score,
                             num_comments=num_comments,
+                            top_comments=top_comments,
                         )
 
                         existing = collected.get(post_id)
@@ -258,7 +299,17 @@ class RedditLeadCollector:
                     url = f"https://www.reddit.com{permalink}" if permalink else fallback_url
                     if not self._is_valid_post_url(url):
                         continue
-                    if not self._is_keyword_match(title, body, keyword):
+
+                    score = int(post_data.get("score") or 0)
+                    num_comments = int(post_data.get("num_comments") or 0)
+
+                    # Fetch comments before the keyword gate so intent-only
+                    # comment leads still pass through.
+                    top_comments = await asyncio.to_thread(
+                        self._fetch_top_comments_sync, url, num_comments
+                    )
+
+                    if not self._is_keyword_match(title, body, keyword, top_comments):
                         continue
 
                     created_utc_value = float(post_data.get("created_utc") or 0)
@@ -267,9 +318,6 @@ class RedditLeadCollector:
                         if created_utc_value > 0
                         else datetime.now(tz=timezone.utc)
                     )
-
-                    score = int(post_data.get("score") or 0)
-                    num_comments = int(post_data.get("num_comments") or 0)
 
                     candidate = CandidatePost(
                         id=post_id,
@@ -281,6 +329,7 @@ class RedditLeadCollector:
                         created_utc=created_utc,
                         score=score,
                         num_comments=num_comments,
+                        top_comments=top_comments,
                     )
 
                     relevance = self._score_keyword_match(
@@ -289,6 +338,7 @@ class RedditLeadCollector:
                         keyword=keyword,
                         score=score,
                         num_comments=num_comments,
+                        top_comments=top_comments,
                     )
 
                     existing = collected.get(post_id)
@@ -368,6 +418,65 @@ class RedditLeadCollector:
                 pass
         return min(PUBLIC_SEARCH_BASE_BACKOFF_SECONDS * (2 ** attempt), 5.0)
 
+    # ------------------------------------------------------------------
+    # Comment fetching
+    # ------------------------------------------------------------------
+
+    async def _fetch_top_comments(self, post_url: str, num_comments: int) -> list[str]:
+        """Async wrapper — runs the blocking HTTP call on a thread so the event
+        loop stays free during the network round-trip."""
+        from app.core.constants import COMMENT_INTENT_FETCH_THRESHOLD
+        if num_comments < COMMENT_INTENT_FETCH_THRESHOLD:
+            return []
+        return await asyncio.to_thread(self._fetch_top_comments_sync, post_url, num_comments)
+
+    def _fetch_top_comments_sync(self, post_url: str, num_comments: int) -> list[str]:
+        """Fetch up to *_MAX_COMMENTS_TO_FETCH* top-level comment bodies for a post.
+
+        Uses Reddit's public `<post_url>.json` endpoint (no auth required) so it
+        works regardless of whether OAuth credentials are configured.  Falls back
+        to an empty list on any network or parse failure so the lead pipeline is
+        never blocked by a comment-fetch error.
+        """
+        from app.core.constants import COMMENT_INTENT_FETCH_THRESHOLD
+        if num_comments < COMMENT_INTENT_FETCH_THRESHOLD:
+            return []
+
+        json_url = post_url.rstrip("/") + ".json?limit=10&depth=1"
+        user_agent = self.user_agent or "f1bot-local"
+
+        try:
+            payload = self._request_json_with_retry(url=json_url, user_agent=user_agent)
+        except Exception:
+            return []
+
+        # Reddit returns a 2-element array: [post_listing, comment_listing]
+        if not isinstance(payload, list) or len(payload) < 2:
+            return []
+
+        comment_listing = payload[1]
+        children = (
+            comment_listing.get("data", {}).get("children", [])
+            if isinstance(comment_listing, dict)
+            else []
+        )
+
+        comments: list[str] = []
+        for child in children:
+            if not isinstance(child, dict):
+                continue
+            # Only include actual comments (kind "t1"), not "more" stubs
+            if child.get("kind") != "t1":
+                continue
+            body = str(child.get("data", {}).get("body") or "").strip()
+            if not body or body == "[deleted]" or body == "[removed]":
+                continue
+            comments.append(body[:_MAX_COMMENT_BODY_CHARS])
+            if len(comments) >= _MAX_COMMENTS_TO_FETCH:
+                break
+
+        return comments
+
     def _prune_public_cache(self, now: float) -> None:
         stale_keys = [
             key for key, (created_at, _) in self._public_search_cache.items()
@@ -398,10 +507,16 @@ class RedditLeadCollector:
     def _is_valid_post_url(self, url: str) -> bool:
         return bool(url and url.startswith("https://www.reddit.com/"))
 
-    def _is_keyword_match(self, title: str, body: str, keyword: str) -> bool:
+    def _is_keyword_match(
+        self, title: str, body: str, keyword: str, top_comments: list[str] | None = None
+    ) -> bool:
         content = f"{title} {body}".lower()
         token_hits, phrase_hit = self._keyword_match_stats(content, keyword)
         if phrase_hit:
+            return True
+
+        # A strong comment-level intent signal alone is sufficient to surface the post.
+        if top_comments and self._has_comment_intent_signal(top_comments):
             return True
 
         keyword_tokens = [token for token in keyword.lower().split() if token]
@@ -433,6 +548,19 @@ class RedditLeadCollector:
             return True
         return any(signal in content for signal in INTENT_SIGNALS)
 
+    def _has_comment_intent_signal(self, top_comments: list[str]) -> bool:
+        """Return True if any comment contains a strong buyer-intent phrase.
+
+        Checks both the general INTENT_SIGNALS and the higher-specificity
+        COMMENT_INTENT_SIGNALS so nothing is double-counted.
+        """
+        for comment in top_comments:
+            lowered = comment.lower()
+            if any(signal in lowered for signal in COMMENT_INTENT_SIGNALS):
+                return True
+            if any(signal in lowered for signal in INTENT_SIGNALS):
+                return True
+        return False
     def _score_keyword_match(
         self,
         title: str,
@@ -440,6 +568,7 @@ class RedditLeadCollector:
         keyword: str,
         score: int,
         num_comments: int,
+        top_comments: list[str] | None = None,
     ) -> float:
         content = f"{title} {body}".lower()
         token_hits, phrase_hit = self._keyword_match_stats(content, keyword)
@@ -447,10 +576,23 @@ class RedditLeadCollector:
         intent_bonus = 2.0 if self._has_intent_signal(title, body) else 0.0
         low_intent_penalty = 2.5 if any(signal in content for signal in LOW_INTENT_SIGNALS) else 0.0
 
+        # Extra relevance boost when a high-specificity buyer-intent phrase is
+        # detected in the comment thread.  Kept intentionally modest (3.5) so it
+        # lifts qualifying comment-intent posts without dominating the ranking.
+        comment_intent_bonus = 0.0
+        if top_comments:
+            for comment in top_comments:
+                lowered = comment.lower()
+                if any(signal in lowered for signal in COMMENT_INTENT_SIGNALS):
+                    comment_intent_bonus = 3.5
+                    break
+                if any(signal in lowered for signal in INTENT_SIGNALS):
+                    comment_intent_bonus = max(comment_intent_bonus, 1.5)
+
         keyword_score = (token_hits * 4.0) + (6.0 if phrase_hit else 0.0)
         engagement_score = (min(num_comments, 80) * 0.02) + (min(max(score, 0), 200) * 0.004)
 
-        return max(0.0, keyword_score + intent_bonus + engagement_score - low_intent_penalty)
+        return max(0.0, keyword_score + intent_bonus + comment_intent_bonus + engagement_score - low_intent_penalty)
 
     def _per_query_limit(self, request_limit: int, subreddit_count: int) -> int:
         return min(MAX_QUERY_LIMIT, max(MIN_QUERY_LIMIT, request_limit // max(subreddit_count, 1)))
