@@ -411,6 +411,21 @@ Current test files:
 - `backend/tests/test_leads_csv_export.py`
 - `backend/tests/test_leads_repository.py`
 
+Frontend smoke test (Playwright):
+
+```bash
+cd frontend
+npx playwright install chromium
+npm run test:e2e
+```
+
+Frontend Playwright MCP server:
+
+```bash
+cd frontend
+npm run playwright:mcp
+```
+
 ## 10. Production Deployment Notes
 
 Use this checklist before production go-live:

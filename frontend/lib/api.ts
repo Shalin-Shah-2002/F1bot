@@ -4,6 +4,7 @@ export interface CandidatePost {
   id: string;
   title: string;
   body: string;
+  match_source: "post" | "comment";
   subreddit: string;
   url: string;
   author: string;

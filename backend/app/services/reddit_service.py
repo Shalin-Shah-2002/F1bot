@@ -37,6 +37,7 @@ PUBLIC_SEARCH_LISTING_TIMEOUT_SECONDS = 8
 PUBLIC_SEARCH_LISTING_MAX_RETRIES = 2
 COMMENT_FETCH_TIMEOUT_SECONDS = 4
 COMMENT_FETCH_MAX_RETRIES = 1
+COMMENT_MORECHILDREN_BATCH_SIZE = 100
 
 INTENT_SIGNALS = (
     "looking for",
@@ -58,15 +59,24 @@ COMMENT_INTENT_SIGNALS = (
     "this is exactly what i need",
     "anyone recommend",
     "can anyone recommend",
+    "can someone recommend",
+    "what do you recommend",
     "does anyone know a tool",
     "anyone know of a good",
     "is there a tool that",
     "is there an app that",
     "is there a service that",
+    "what tool should i use",
+    "which tool should i use",
+    "need a tool for",
+    "need software for",
+    "need an app for",
     "have you tried",
     "i would pay for",
     "i'd pay for",
+    "happy to pay for",
     "willing to pay",
+    "paid tool for",
     "looking to buy",
     "ready to buy",
     "where can i find",
@@ -86,7 +96,7 @@ LOW_INTENT_SIGNALS = (
 )
 
 
-# Maximum number of top-level comments to fetch per post.
+# Maximum number of comments to keep per post during scan-time intent checks.
 _MAX_COMMENTS_TO_FETCH = 10
 # Per-comment character limit stored on CandidatePost.
 _MAX_COMMENT_BODY_CHARS = 500
@@ -103,6 +113,7 @@ class RedditLeadCollector:
         self.client_secret = client_secret
         self.user_agent = user_agent
         self._public_search_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
+        self._comment_cache: dict[str, list[str]] = {}
 
     async def fetch_candidate_posts(
         self,
@@ -131,6 +142,7 @@ class RedditLeadCollector:
         # Try progressively wider time windows so repeat scans surface fresh posts.
         time_filters = ["week", "month", "year", "all"]
         all_posts: list[CandidatePost] = []
+        all_live_posts: list[CandidatePost] = []
 
         for time_filter in time_filters:
             if self._scan_deadline_exceeded(scan_deadline):
@@ -157,6 +169,7 @@ class RedditLeadCollector:
                     scan_deadline=scan_deadline,
                 )
                 if posts:
+                    all_live_posts.extend(posts)
                     new_posts = [p for p in posts if p.id not in seen]
                     all_posts.extend(new_posts)
                     if len(all_posts) >= request.limit:
@@ -173,6 +186,7 @@ class RedditLeadCollector:
                 scan_budget=scan_budget,
                 scan_deadline=scan_deadline,
             )
+            all_live_posts.extend(posts)
             new_posts = [p for p in posts if p.id not in seen]
             all_posts.extend(new_posts)
             if len(all_posts) >= request.limit:
@@ -188,6 +202,21 @@ class RedditLeadCollector:
 
         if unique_posts:
             return unique_posts[:max_candidates]
+
+        # We found live Reddit results, but all were already shown to this user.
+        # Return those live posts instead of synthetic sample data.
+        seen_live_ids: set[str] = set()
+        unique_live_posts: list[CandidatePost] = []
+        for post in all_live_posts:
+            if post.id not in seen_live_ids:
+                seen_live_ids.add(post.id)
+                unique_live_posts.append(post)
+
+        if unique_live_posts:
+            logger.info(
+                "No fresh Reddit posts found after deduplication; returning previously seen live posts."
+            )
+            return unique_live_posts[:max_candidates]
 
         if not allow_sample_fallback:
             logger.warning("No Reddit posts found from live search; sample fallback is disabled.")
@@ -254,14 +283,12 @@ class RedditLeadCollector:
 
                         if not self._is_valid_post_url(url):
                             continue
-                        if not self._is_keyword_match(title, body, keyword):
-                            continue
 
                         score = int(getattr(submission, "score", 0) or 0)
                         num_comments = int(getattr(submission, "num_comments", 0) or 0)
 
-                        # Fetch comments for posts with enough engagement so we can
-                        # detect buyer-intent signals that appear only in threads.
+                        # Fetch comments before the keyword gate so intent-only
+                        # comment leads still pass through.
                         top_comments: list[str] = []
                         if self._should_fetch_comments(
                             num_comments=num_comments,
@@ -269,9 +296,10 @@ class RedditLeadCollector:
                             scan_deadline=scan_deadline,
                         ):
                             self._consume_comment_budget(scan_budget)
-                            top_comments = await self._fetch_top_comments(
-                                url,
-                                num_comments,
+                            top_comments = await self._fetch_comments_for_post(
+                                post_id=post_id,
+                                post_url=url,
+                                num_comments=num_comments,
                                 timeout_seconds=COMMENT_FETCH_TIMEOUT_SECONDS,
                                 max_retries=COMMENT_FETCH_MAX_RETRIES,
                             )
@@ -279,10 +307,18 @@ class RedditLeadCollector:
                         if not self._is_keyword_match(title, body, keyword, top_comments):
                             continue
 
+                        match_source = self._determine_match_source(
+                            title=title,
+                            body=body,
+                            keyword=keyword,
+                            top_comments=top_comments,
+                        )
+
                         candidate = CandidatePost(
                             id=post_id,
                             title=title,
                             body=body,
+                            match_source=match_source,
                             subreddit=subreddit_name,
                             url=url,
                             author=author,
@@ -384,16 +420,23 @@ class RedditLeadCollector:
                         scan_deadline=scan_deadline,
                     ):
                         self._consume_comment_budget(scan_budget)
-                        top_comments = await asyncio.to_thread(
-                            self._fetch_top_comments_sync,
-                            url,
-                            num_comments,
-                            COMMENT_FETCH_TIMEOUT_SECONDS,
-                            COMMENT_FETCH_MAX_RETRIES,
+                        top_comments = await self._fetch_comments_for_post(
+                            post_id=post_id,
+                            post_url=url,
+                            num_comments=num_comments,
+                            timeout_seconds=COMMENT_FETCH_TIMEOUT_SECONDS,
+                            max_retries=COMMENT_FETCH_MAX_RETRIES,
                         )
 
                     if not self._is_keyword_match(title, body, keyword, top_comments):
                         continue
+
+                    match_source = self._determine_match_source(
+                        title=title,
+                        body=body,
+                        keyword=keyword,
+                        top_comments=top_comments,
+                    )
 
                     created_utc_value = float(post_data.get("created_utc") or 0)
                     created_utc = (
@@ -406,6 +449,7 @@ class RedditLeadCollector:
                         id=post_id,
                         title=title,
                         body=body,
+                        match_source=match_source,
                         subreddit=str(post_data.get("subreddit") or subreddit_name),
                         url=url,
                         author=str(post_data.get("author") or "unknown"),
@@ -520,6 +564,27 @@ class RedditLeadCollector:
     # Comment fetching
     # ------------------------------------------------------------------
 
+    async def _fetch_comments_for_post(
+        self,
+        post_id: str,
+        post_url: str,
+        num_comments: int,
+        timeout_seconds: float,
+        max_retries: int,
+    ) -> list[str]:
+        cached = self._comment_cache.get(post_id)
+        if cached is not None:
+            return cached
+
+        comments = await self._fetch_top_comments(
+            post_url=post_url,
+            num_comments=num_comments,
+            timeout_seconds=timeout_seconds,
+            max_retries=max_retries,
+        )
+        self._comment_cache[post_id] = comments
+        return comments
+
     async def _fetch_top_comments(
         self,
         post_url: str,
@@ -546,7 +611,7 @@ class RedditLeadCollector:
         timeout_seconds: float = COMMENT_FETCH_TIMEOUT_SECONDS,
         max_retries: int = COMMENT_FETCH_MAX_RETRIES,
     ) -> list[str]:
-        """Fetch up to *_MAX_COMMENTS_TO_FETCH* top-level comment bodies for a post.
+        """Fetch the full available comment tree for a post.
 
         Uses Reddit's public `<post_url>.json` endpoint (no auth required) so it
         works regardless of whether OAuth credentials are configured.  Falls back
@@ -556,7 +621,7 @@ class RedditLeadCollector:
         if num_comments < COMMENT_INTENT_FETCH_THRESHOLD:
             return []
 
-        json_url = post_url.rstrip("/") + ".json?limit=10&depth=1"
+        json_url = post_url.rstrip("/") + ".json?limit=500&depth=10&raw_json=1"
         user_agent = self.user_agent or "f1bot-local"
 
         try:
@@ -573,6 +638,7 @@ class RedditLeadCollector:
         if not isinstance(payload, list) or len(payload) < 2:
             return []
 
+        post_fullname = self._extract_post_fullname(payload[0], post_url)
         comment_listing = payload[1]
         children = (
             comment_listing.get("data", {}).get("children", [])
@@ -581,20 +647,165 @@ class RedditLeadCollector:
         )
 
         comments: list[str] = []
-        for child in children:
-            if not isinstance(child, dict):
+        pending_more: list[str] = []
+        seen_comment_ids: set[str] = set()
+        seen_more_ids: set[str] = set()
+        hit_comment_limit = self._collect_comments_from_nodes(
+            nodes=children,
+            comments=comments,
+            pending_more=pending_more,
+            seen_comment_ids=seen_comment_ids,
+            seen_more_ids=seen_more_ids,
+        )
+
+        if hit_comment_limit or not post_fullname or not pending_more:
+            return comments
+
+        deadline = time.monotonic() + max(1.0, timeout_seconds)
+        while (
+            pending_more
+            and len(comments) < _MAX_COMMENTS_TO_FETCH
+            and time.monotonic() < deadline
+        ):
+            batch = self._next_more_batch(pending_more)
+            if not batch:
+                break
+
+            extra_nodes = self._fetch_morechildren_sync(
+                user_agent=user_agent,
+                post_fullname=post_fullname,
+                child_ids=batch,
+                timeout_seconds=timeout_seconds,
+                max_retries=max_retries,
+            )
+            if not extra_nodes:
                 continue
-            # Only include actual comments (kind "t1"), not "more" stubs
-            if child.get("kind") != "t1":
-                continue
-            body = str(child.get("data", {}).get("body") or "").strip()
-            if not body or body == "[deleted]" or body == "[removed]":
-                continue
-            comments.append(body[:_MAX_COMMENT_BODY_CHARS])
-            if len(comments) >= _MAX_COMMENTS_TO_FETCH:
+
+            hit_comment_limit = self._collect_comments_from_nodes(
+                nodes=extra_nodes,
+                comments=comments,
+                pending_more=pending_more,
+                seen_comment_ids=seen_comment_ids,
+                seen_more_ids=seen_more_ids,
+            )
+            if hit_comment_limit:
                 break
 
         return comments
+
+    def _collect_comments_from_nodes(
+        self,
+        nodes: list[dict[str, Any]],
+        comments: list[str],
+        pending_more: list[str],
+        seen_comment_ids: set[str],
+        seen_more_ids: set[str],
+    ) -> bool:
+        queue: list[dict[str, Any]] = [node for node in nodes if isinstance(node, dict)]
+        cursor = 0
+
+        while cursor < len(queue):
+            if len(comments) >= _MAX_COMMENTS_TO_FETCH:
+                return True
+
+            node = queue[cursor]
+            cursor += 1
+            kind = str(node.get("kind") or "")
+            data = node.get("data", {})
+            if not isinstance(data, dict):
+                continue
+
+            if kind == "t1":
+                comment_id = str(data.get("id") or "")
+                if comment_id:
+                    if comment_id in seen_comment_ids:
+                        continue
+                    seen_comment_ids.add(comment_id)
+
+                body = str(data.get("body") or "").strip()
+                if body and body not in {"[deleted]", "[removed]"}:
+                    comments.append(body[:_MAX_COMMENT_BODY_CHARS])
+                    if len(comments) >= _MAX_COMMENTS_TO_FETCH:
+                        return True
+
+                replies = data.get("replies")
+                if isinstance(replies, dict):
+                    reply_children = replies.get("data", {}).get("children", [])
+                    if isinstance(reply_children, list):
+                        queue.extend(child for child in reply_children if isinstance(child, dict))
+                continue
+
+            if kind == "more":
+                child_ids = data.get("children", [])
+                if not isinstance(child_ids, list):
+                    continue
+
+                for child_id in child_ids:
+                    normalized = str(child_id or "").strip()
+                    if not normalized or normalized in seen_more_ids:
+                        continue
+                    seen_more_ids.add(normalized)
+                    pending_more.append(normalized)
+
+        return len(comments) >= _MAX_COMMENTS_TO_FETCH
+
+    def _next_more_batch(self, pending_more: list[str]) -> list[str]:
+        if not pending_more:
+            return []
+
+        batch_size = min(COMMENT_MORECHILDREN_BATCH_SIZE, len(pending_more))
+        batch = pending_more[:batch_size]
+        del pending_more[:batch_size]
+        return batch
+
+    def _fetch_morechildren_sync(
+        self,
+        user_agent: str,
+        post_fullname: str,
+        child_ids: list[str],
+        timeout_seconds: float,
+        max_retries: int,
+    ) -> list[dict[str, Any]]:
+        if not child_ids:
+            return []
+
+        encoded_children = urllib.parse.quote(",".join(child_ids), safe=",")
+        url = (
+            "https://www.reddit.com/api/morechildren.json"
+            f"?link_id={post_fullname}&children={encoded_children}"
+            "&api_type=json&raw_json=1"
+        )
+
+        payload = self._request_json_with_retry(
+            url=url,
+            user_agent=user_agent,
+            max_retries=max_retries,
+            timeout_seconds=timeout_seconds,
+        )
+        if not isinstance(payload, dict):
+            return []
+
+        things = payload.get("json", {}).get("data", {}).get("things", [])
+        if not isinstance(things, list):
+            return []
+        return [node for node in things if isinstance(node, dict)]
+
+    def _extract_post_fullname(self, post_listing: Any, post_url: str) -> str | None:
+        if isinstance(post_listing, dict):
+            children = post_listing.get("data", {}).get("children", [])
+            if isinstance(children, list):
+                for child in children:
+                    if not isinstance(child, dict):
+                        continue
+                    post_id = str(child.get("data", {}).get("id") or "").strip()
+                    if post_id:
+                        return f"t3_{post_id}"
+
+        match = re.search(r"/comments/([a-z0-9]+)/", post_url, flags=re.IGNORECASE)
+        if match:
+            return f"t3_{match.group(1)}"
+
+        return None
 
     def _prune_public_cache(self, now: float) -> None:
         stale_keys = [
@@ -725,6 +936,21 @@ class RedditLeadCollector:
             if any(signal in lowered for signal in INTENT_SIGNALS):
                 return True
         return False
+
+    def _determine_match_source(
+        self,
+        title: str,
+        body: str,
+        keyword: str,
+        top_comments: list[str] | None = None,
+    ) -> str:
+        post_match = self._is_keyword_match(title, body, keyword)
+        comment_match = bool(top_comments) and self._has_comment_intent_signal(top_comments)
+
+        if comment_match and not post_match:
+            return "comment"
+        return "post"
+
     def _score_keyword_match(
         self,
         title: str,

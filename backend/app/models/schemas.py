@@ -44,6 +44,7 @@ class CandidatePost(BaseModel):
     id: str
     title: str
     body: str
+    match_source: Literal["post", "comment"] = "post"
     subreddit: str
     url: str
     author: str

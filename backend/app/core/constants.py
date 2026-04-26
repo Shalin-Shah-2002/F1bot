@@ -102,5 +102,6 @@ PROMPT_MAX_BUSINESS_CHARS = 320
 PROMPT_MAX_COMMENT_CHARS = 160  # per-comment truncation sent to Gemini
 
 # Comments are only fetched for posts with at least this many comments.
-# Below this threshold the post body alone is usually sufficient signal.
-COMMENT_INTENT_FETCH_THRESHOLD = 3
+# Lowering this slightly improves recall for comment-only buyer intent while
+# keeping fetch cost bounded by per-scan budgets.
+COMMENT_INTENT_FETCH_THRESHOLD = 2

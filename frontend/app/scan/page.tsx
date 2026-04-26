@@ -71,6 +71,20 @@ export default function ScanPage() {
     [subreddits]
   );
 
+  const sourceBreakdown = useMemo(() => {
+    return leads.reduce(
+      (acc, lead) => {
+        if (lead.post.match_source === "comment") {
+          acc.comment += 1;
+          return acc;
+        }
+        acc.post += 1;
+        return acc;
+      },
+      { post: 0, comment: 0 }
+    );
+  }, [leads]);
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!session) {
@@ -239,6 +253,8 @@ export default function ScanPage() {
             {isRepeatScan ? "New this scan" : "Leads"}: {leads.length}
           </span>
           <span className="brand-badge">Candidates scanned: {totalCandidates}</span>
+          <span className="brand-badge">POST: {sourceBreakdown.post}</span>
+          <span className="brand-badge">COMMENTS: {sourceBreakdown.comment}</span>
           <span className="brand-badge">AI scoring: {usedAi ? "Enabled" : "Heuristic mode"}</span>
           {scanCount > 1 && <span className="brand-badge">Scans run: {scanCount}</span>}
         </div>
@@ -248,7 +264,12 @@ export default function ScanPage() {
             <article key={lead.post.id} className="brand-card p-5">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="text-lg font-semibold">{lead.post.title}</h2>
-                <span className="brand-badge">Score: {lead.lead_score}</span>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="brand-badge">
+                    Source: {lead.post.match_source === "comment" ? "COMMENTS" : "POST"}
+                  </span>
+                  <span className="brand-badge">Score: {lead.lead_score}</span>
+                </div>
               </div>
 
               <p className="mt-1 text-sm text-brand-navy/70">r/{lead.post.subreddit}</p>

@@ -7,14 +7,11 @@ otherwise be missed by title/body-only matching.
 from __future__ import annotations
 
 import asyncio
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
-
+from app.core.constants import COMMENT_INTENT_FETCH_THRESHOLD
 from app.services.reddit_service import (
     COMMENT_INTENT_SIGNALS,
-    INTENT_SIGNALS,
     RedditLeadCollector,
 )
 
@@ -25,6 +22,54 @@ from app.services.reddit_service import (
 
 def _collector() -> RedditLeadCollector:
     return RedditLeadCollector(client_id=None, client_secret=None, user_agent="test-agent")
+
+
+class _AsyncIterator:
+    def __init__(self, items: list[object]) -> None:
+        self._items = items
+        self._index = 0
+
+    def __aiter__(self) -> "_AsyncIterator":
+        return self
+
+    async def __anext__(self) -> object:
+        if self._index >= len(self._items):
+            raise StopAsyncIteration
+
+        item = self._items[self._index]
+        self._index += 1
+        return item
+
+
+class _FakeSubreddit:
+    def __init__(self, submissions: list[object]) -> None:
+        self._submissions = submissions
+
+    def search(self, *_: object, **__: object) -> _AsyncIterator:
+        return _AsyncIterator(self._submissions)
+
+
+class _FakeRedditClient:
+    def __init__(self, submissions: list[object]) -> None:
+        self._submissions = submissions
+        self.closed = False
+
+    async def subreddit(self, _name: str) -> _FakeSubreddit:
+        return _FakeSubreddit(self._submissions)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class _FakeAsyncPrawModule:
+    def __init__(self, submissions: list[object]) -> None:
+        self._submissions = submissions
+        self.last_client: _FakeRedditClient | None = None
+
+    def Reddit(self, **_: object) -> _FakeRedditClient:  # noqa: N802 (matches asyncpraw API)
+        client = _FakeRedditClient(self._submissions)
+        self.last_client = client
+        return client
 
 
 # ---------------------------------------------------------------------------
@@ -312,6 +357,129 @@ class TestFetchTopCommentsSync:
         assert len(result) == 1
         assert len(result[0]) <= 500  # _MAX_COMMENT_BODY_CHARS
 
+    def test_caps_total_collected_comments(self) -> None:
+        c = _collector()
+        payload = self._make_reddit_comment_payload([f"comment-{i}" for i in range(20)])
+
+        with patch.object(c, "_request_json_with_retry", return_value=payload):
+            result = c._fetch_top_comments_sync(
+                "https://www.reddit.com/r/test/comments/abc/", num_comments=25
+            )
+
+        assert len(result) == 10
+        assert result[0] == "comment-0"
+        assert result[-1] == "comment-9"
+
+    def test_collects_nested_reply_comments(self) -> None:
+        c = _collector()
+        payload = [
+            {
+                "kind": "Listing",
+                "data": {
+                    "children": [
+                        {"kind": "t3", "data": {"id": "abc"}},
+                    ]
+                },
+            },
+            {
+                "kind": "Listing",
+                "data": {
+                    "children": [
+                        {
+                            "kind": "t1",
+                            "data": {
+                                "id": "c1",
+                                "body": "Top level comment",
+                                "replies": {
+                                    "kind": "Listing",
+                                    "data": {
+                                        "children": [
+                                            {
+                                                "kind": "t1",
+                                                "data": {
+                                                    "id": "c2",
+                                                    "body": "Nested reply comment",
+                                                },
+                                            }
+                                        ]
+                                    },
+                                },
+                            },
+                        }
+                    ]
+                },
+            },
+        ]
+
+        with patch.object(c, "_request_json_with_retry", return_value=payload):
+            result = c._fetch_top_comments_sync(
+                "https://www.reddit.com/r/test/comments/abc/", num_comments=5
+            )
+
+        assert "Top level comment" in result
+        assert "Nested reply comment" in result
+
+    def test_fetches_morechildren_comments(self) -> None:
+        c = _collector()
+        initial_payload = [
+            {
+                "kind": "Listing",
+                "data": {
+                    "children": [
+                        {"kind": "t3", "data": {"id": "abc"}},
+                    ]
+                },
+            },
+            {
+                "kind": "Listing",
+                "data": {
+                    "children": [
+                        {
+                            "kind": "more",
+                            "data": {
+                                "children": ["c2", "c3"],
+                            },
+                        }
+                    ]
+                },
+            },
+        ]
+
+        morechildren_payload = {
+            "json": {
+                "data": {
+                    "things": [
+                        {
+                            "kind": "t1",
+                            "data": {
+                                "id": "c2",
+                                "body": "Loaded via morechildren",
+                            },
+                        },
+                        {
+                            "kind": "t1",
+                            "data": {
+                                "id": "c3",
+                                "body": "Second morechildren comment",
+                            },
+                        },
+                    ]
+                }
+            }
+        }
+
+        with patch.object(
+            c,
+            "_request_json_with_retry",
+            side_effect=[initial_payload, morechildren_payload],
+        ):
+            result = c._fetch_top_comments_sync(
+                "https://www.reddit.com/r/test/comments/abc/", num_comments=5
+            )
+
+        assert "Loaded via morechildren" in result
+        assert "Second morechildren comment" in result
+
 
 # ---------------------------------------------------------------------------
 # Async wrapper: _fetch_top_comments
@@ -320,8 +488,12 @@ class TestFetchTopCommentsSync:
 class TestFetchTopCommentsAsync:
     def test_returns_empty_below_threshold(self) -> None:
         c = _collector()
+        below_threshold = max(COMMENT_INTENT_FETCH_THRESHOLD - 1, 0)
         result = asyncio.run(
-            c._fetch_top_comments("https://www.reddit.com/r/test/comments/abc/", num_comments=2)
+            c._fetch_top_comments(
+                "https://www.reddit.com/r/test/comments/abc/",
+                num_comments=below_threshold,
+            )
         )
         assert result == []
 
@@ -337,3 +509,32 @@ class TestFetchTopCommentsAsync:
             )
 
         assert result == expected
+
+
+class TestCommentFetchCache:
+    def test_reuses_cached_comments_for_same_post(self) -> None:
+        c = _collector()
+
+        async def _run() -> tuple[list[str], list[str], int]:
+            with patch.object(c, "_fetch_top_comments", return_value=["cached comment"]) as mocked:
+                first = await c._fetch_comments_for_post(
+                    post_id="abc",
+                    post_url="https://www.reddit.com/r/test/comments/abc/",
+                    num_comments=7,
+                    timeout_seconds=4,
+                    max_retries=1,
+                )
+                second = await c._fetch_comments_for_post(
+                    post_id="abc",
+                    post_url="https://www.reddit.com/r/test/comments/abc/",
+                    num_comments=7,
+                    timeout_seconds=4,
+                    max_retries=1,
+                )
+                return first, second, mocked.call_count
+
+        first_result, second_result, call_count = asyncio.run(_run())
+
+        assert first_result == ["cached comment"]
+        assert second_result == ["cached comment"]
+        assert call_count == 1

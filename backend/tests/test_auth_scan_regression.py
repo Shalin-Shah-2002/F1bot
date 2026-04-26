@@ -110,6 +110,65 @@ def test_scan_error_response_is_sanitized(monkeypatch: pytest.MonkeyPatch) -> No
     assert "sensitive" not in response.text
 
 
+def test_scan_returns_seen_live_posts_instead_of_sample_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import datetime, timezone
+
+    from app.models.schemas import CandidatePost, LeadInsight
+    from app.repositories.leads_repository import LeadsRepository
+    from app.services.gemini_service import GeminiLeadScorer
+    from app.services.reddit_service import RedditLeadCollector
+
+    live_post = CandidatePost(
+        id="live-1",
+        title="Need practical help with lead generation workflow",
+        body="We keep hitting dead ends with tooling choices.",
+        subreddit="entrepreneur",
+        url="https://www.reddit.com/r/entrepreneur/comments/live1/test/",
+        author="founder-live",
+        created_utc=datetime.now(tz=timezone.utc),
+        score=14,
+        num_comments=5,
+    )
+
+    def _fake_seen_ids(self: LeadsRepository, user_id: str) -> set[str]:
+        return {"live-1"}
+
+    async def _fake_public_search(self: RedditLeadCollector, **_: object) -> list[CandidatePost]:
+        return [live_post]
+
+    def _fail_sample_fallback(self: RedditLeadCollector, request: object) -> list[CandidatePost]:
+        raise AssertionError("Sample fallback should not run when live Reddit posts exist")
+
+    async def _fake_score(
+        self: GeminiLeadScorer,
+        request: object,
+        posts: list[CandidatePost],
+    ) -> list[LeadInsight]:
+        return [
+            LeadInsight(
+                post=post,
+                lead_score=80,
+                qualification_reason="Live post still relevant despite prior exposure.",
+                suggested_outreach="Offer a concrete workflow audit.",
+            )
+            for post in posts
+        ]
+
+    monkeypatch.setattr(LeadsRepository, "get_seen_post_ids", _fake_seen_ids)
+    monkeypatch.setattr(RedditLeadCollector, "_fetch_with_public_search", _fake_public_search)
+    monkeypatch.setattr(RedditLeadCollector, "_sample_posts", _fail_sample_fallback)
+    monkeypatch.setattr(GeminiLeadScorer, "score_posts", _fake_score)
+
+    with build_test_client(monkeypatch, SAMPLE_LEADS_FALLBACK_ENABLED="true") as client:
+        response = client.post("/api/leads/scan", json=SCAN_PAYLOAD, headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    leads = response.json()["leads"]
+    assert leads
+    assert leads[0]["post"]["id"] == "live-1"
+    assert not leads[0]["post"]["id"].startswith("sample-")
+
+
 def test_scan_rate_limit_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.services.gemini_service import GeminiLeadScorer
     from app.services.reddit_service import RedditLeadCollector
