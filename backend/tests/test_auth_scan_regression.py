@@ -169,6 +169,44 @@ def test_scan_returns_seen_live_posts_instead_of_sample_fallback(monkeypatch: py
     assert not leads[0]["post"]["id"].startswith("sample-")
 
 
+def test_scan_runs_without_gemini_key_using_non_ai_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import datetime, timezone
+
+    from app.models.schemas import CandidatePost
+    from app.services.reddit_service import RedditLeadCollector
+
+    async def _fake_fetch(
+        self: RedditLeadCollector,
+        request: object,
+        seen_post_ids: set[str] | None = None,
+        allow_sample_fallback: bool = True,
+    ) -> list[CandidatePost]:
+        return [
+            CandidatePost(
+                id="buyer-1",
+                title="Need a freelance developer for website improvements",
+                body="Looking for recommendations for someone reliable.",
+                subreddit="entrepreneur",
+                url="https://www.reddit.com/r/entrepreneur/comments/buyer1/test/",
+                author="buyer-user",
+                created_utc=datetime.now(tz=timezone.utc),
+                score=9,
+                num_comments=6,
+            )
+        ]
+
+    monkeypatch.setattr(RedditLeadCollector, "fetch_candidate_posts", _fake_fetch)
+
+    with build_test_client(monkeypatch, GEMINI_API_KEY="") as client:
+        response = client.post("/api/leads/scan", json=SCAN_PAYLOAD, headers=AUTH_HEADERS)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["used_ai"] is False
+    assert payload["leads"]
+    assert payload["leads"][0]["post"]["id"] == "buyer-1"
+
+
 def test_scan_rate_limit_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
     from app.services.gemini_service import GeminiLeadScorer
     from app.services.reddit_service import RedditLeadCollector

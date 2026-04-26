@@ -13,6 +13,7 @@ from app.core.constants import COMMENT_INTENT_FETCH_THRESHOLD
 from app.services.reddit_service import (
     COMMENT_INTENT_SIGNALS,
     RedditLeadCollector,
+    SELLER_PROMO_SIGNALS,
 )
 
 
@@ -96,6 +97,16 @@ class TestCommentIntentSignalsList:
         """Signals must be lowercase so `.lower()` comparisons work correctly."""
         for sig in COMMENT_INTENT_SIGNALS:
             assert sig == sig.lower(), f"Signal not lowercase: {sig!r}"
+
+
+class TestSellerPromoSignalsList:
+    def test_signals_list_is_non_empty(self) -> None:
+        assert len(SELLER_PROMO_SIGNALS) > 0
+
+    def test_expected_self_promo_phrases_present(self) -> None:
+        must_contain = ["hire me", "dm me", "available for hire", "i'm a developer"]
+        for phrase in must_contain:
+            assert phrase in SELLER_PROMO_SIGNALS, f"Expected '{phrase}' in SELLER_PROMO_SIGNALS"
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +202,24 @@ class TestIsKeywordMatchWithComments:
         )
         assert result is True
 
+    def test_self_promo_post_is_rejected_even_with_keyword_match(self) -> None:
+        c = _collector()
+        result = c._is_keyword_match(
+            title="I'm a developer available for hire",
+            body="DM me if you need freelance help building your app.",
+            keyword="developer freelancer",
+        )
+        assert result is False
+
+    def test_buyer_intent_post_is_not_rejected(self) -> None:
+        c = _collector()
+        result = c._is_keyword_match(
+            title="Need a freelance developer for MVP backend",
+            body="Can anyone recommend someone reliable?",
+            keyword="freelance developer",
+        )
+        assert result is True
+
 
 # ---------------------------------------------------------------------------
 # _score_keyword_match with top_comments
@@ -260,6 +289,24 @@ class TestScoreKeywordMatchWithComments:
             num_comments=3,
         )
         assert result >= 0.0
+
+    def test_self_promo_penalty_reduces_score(self) -> None:
+        c = _collector()
+        buyer_score = c._score_keyword_match(
+            title="Need freelance developer recommendation",
+            body="Looking for help with React + FastAPI project.",
+            keyword="freelance developer",
+            score=10,
+            num_comments=4,
+        )
+        seller_score = c._score_keyword_match(
+            title="Freelancer here - available for hire",
+            body="DM me for development work.",
+            keyword="freelance developer",
+            score=10,
+            num_comments=4,
+        )
+        assert seller_score < buyer_score
 
 
 # ---------------------------------------------------------------------------

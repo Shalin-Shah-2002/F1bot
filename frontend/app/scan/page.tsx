@@ -1,19 +1,104 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { getProfile, scanLeads, type LeadInsight } from "@/lib/api";
 import { useSessionGuard } from "@/lib/use-session-guard";
 
 const DEFAULT_SUBREDDITS = "loseit,CICO,nutrition,weightlossadvice,Fitness,MealPrepSunday,PCOSloseit";
 const DEFAULT_KEYWORDS = "calorie tracker,calorie counting app,macro tracking,lose weight app,weight loss plateau,fitness app recommendation";
+const DEFAULT_BUSINESS_DESCRIPTION =
+  "CalPal is a calorie tracker that helps people lose weight consistently with simple meal logging, macro guidance, and accountability nudges.";
+const SCAN_PAGE_STATE_KEY = "scan-page-state";
+
+interface StoredScanPageState {
+  businessDescription: string;
+  keywords: string;
+  subreddits: string;
+  limit: number;
+  leads: LeadInsight[];
+  usedAi: boolean;
+  totalCandidates: number;
+  scanCount: number;
+}
+
+function toNumberInRange(value: unknown, fallback: number, min?: number, max?: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fallback;
+  }
+
+  if (typeof min === "number" && value < min) {
+    return min;
+  }
+
+  if (typeof max === "number" && value > max) {
+    return max;
+  }
+
+  return value;
+}
+
+function isCandidatePost(value: unknown): value is LeadInsight["post"] {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const post = value as Record<string, unknown>;
+  return (
+    typeof post.id === "string" &&
+    typeof post.title === "string" &&
+    typeof post.body === "string" &&
+    (post.match_source === "post" || post.match_source === "comment") &&
+    typeof post.subreddit === "string" &&
+    typeof post.url === "string" &&
+    typeof post.author === "string" &&
+    typeof post.created_utc === "string" &&
+    typeof post.score === "number" &&
+    typeof post.num_comments === "number"
+  );
+}
+
+function isLeadInsight(value: unknown): value is LeadInsight {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const lead = value as Record<string, unknown>;
+  return (
+    isCandidatePost(lead.post) &&
+    typeof lead.lead_score === "number" &&
+    typeof lead.qualification_reason === "string" &&
+    typeof lead.suggested_outreach === "string"
+  );
+}
+
+function parseStoredScanPageState(rawState: string): StoredScanPageState | null {
+  try {
+    const parsedState = JSON.parse(rawState) as Record<string, unknown>;
+
+    return {
+      businessDescription:
+        typeof parsedState.businessDescription === "string"
+          ? parsedState.businessDescription
+          : DEFAULT_BUSINESS_DESCRIPTION,
+      keywords: typeof parsedState.keywords === "string" ? parsedState.keywords : DEFAULT_KEYWORDS,
+      subreddits: typeof parsedState.subreddits === "string" ? parsedState.subreddits : DEFAULT_SUBREDDITS,
+      limit: toNumberInRange(parsedState.limit, 15, 1, 100),
+      leads: Array.isArray(parsedState.leads) ? parsedState.leads.filter(isLeadInsight) : [],
+      usedAi: typeof parsedState.usedAi === "boolean" ? parsedState.usedAi : false,
+      totalCandidates: toNumberInRange(parsedState.totalCandidates, 0, 0),
+      scanCount: toNumberInRange(parsedState.scanCount, 0, 0),
+    };
+  } catch {
+    return null;
+  }
+}
 
 export default function ScanPage() {
   const router = useRouter();
   const { session, isCheckingSession } = useSessionGuard();
-  const [businessDescription, setBusinessDescription] = useState(
-    "CalPal is a calorie tracker that helps people lose weight consistently with simple meal logging, macro guidance, and accountability nudges."
-  );
+  const restoredFromSessionStorage = useRef(false);
+  const [businessDescription, setBusinessDescription] = useState(DEFAULT_BUSINESS_DESCRIPTION);
   const [keywords, setKeywords] = useState(DEFAULT_KEYWORDS);
   const [subreddits, setSubreddits] = useState(DEFAULT_SUBREDDITS);
   const [limit, setLimit] = useState(15);
@@ -24,9 +109,68 @@ export default function ScanPage() {
   const [totalCandidates, setTotalCandidates] = useState(0);
   // Tracks how many scans have completed so we can adapt UI for repeat scans.
   const [scanCount, setScanCount] = useState(0);
+  const [hasHydratedPersistedState, setHasHydratedPersistedState] = useState(false);
 
   useEffect(() => {
-    if (!session) {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const rawState = window.sessionStorage.getItem(SCAN_PAGE_STATE_KEY);
+    if (!rawState) {
+      setHasHydratedPersistedState(true);
+      return;
+    }
+
+    const parsedState = parseStoredScanPageState(rawState);
+    if (!parsedState) {
+      window.sessionStorage.removeItem(SCAN_PAGE_STATE_KEY);
+      setHasHydratedPersistedState(true);
+      return;
+    }
+
+    restoredFromSessionStorage.current = true;
+    setBusinessDescription(parsedState.businessDescription);
+    setKeywords(parsedState.keywords);
+    setSubreddits(parsedState.subreddits);
+    setLimit(parsedState.limit);
+    setLeads(parsedState.leads);
+    setUsedAi(parsedState.usedAi);
+    setTotalCandidates(parsedState.totalCandidates);
+    setScanCount(parsedState.scanCount);
+    setHasHydratedPersistedState(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !hasHydratedPersistedState) {
+      return;
+    }
+
+    const stateToPersist: StoredScanPageState = {
+      businessDescription,
+      keywords,
+      subreddits,
+      limit,
+      leads,
+      usedAi,
+      totalCandidates,
+      scanCount,
+    };
+    window.sessionStorage.setItem(SCAN_PAGE_STATE_KEY, JSON.stringify(stateToPersist));
+  }, [
+    businessDescription,
+    keywords,
+    subreddits,
+    limit,
+    leads,
+    usedAi,
+    totalCandidates,
+    scanCount,
+    hasHydratedPersistedState,
+  ]);
+
+  useEffect(() => {
+    if (!session || !hasHydratedPersistedState || restoredFromSessionStorage.current) {
       return;
     }
 
@@ -46,7 +190,7 @@ export default function ScanPage() {
     }
 
     hydrateFromProfile();
-  }, [session]);
+  }, [session, hasHydratedPersistedState]);
 
   const canSubmit = useMemo(
     () => businessDescription.trim().length > 10 && !loading,

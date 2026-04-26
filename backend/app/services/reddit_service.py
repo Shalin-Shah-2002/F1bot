@@ -87,6 +87,29 @@ COMMENT_INTENT_SIGNALS = (
     "what is the best way to",
 )
 
+# Signals that usually indicate the author is promoting themselves/services,
+# not seeking help. These should be excluded from lead capture.
+SELLER_PROMO_SIGNALS = (
+    "available for hire",
+    "open for work",
+    "open to work",
+    "for hire",
+    "hire me",
+    "dm me",
+    "message me",
+    "inbox me",
+    "reach out to me",
+    "contact me",
+    "freelancer here",
+    "i am a freelancer",
+    "i'm a freelancer",
+    "developer here",
+    "i am a developer",
+    "i'm a developer",
+    "my services",
+    "my portfolio",
+)
+
 LOW_INTENT_SIGNALS = (
     "progress pic",
     "before and after",
@@ -885,6 +908,9 @@ class RedditLeadCollector:
     def _is_keyword_match(
         self, title: str, body: str, keyword: str, top_comments: list[str] | None = None
     ) -> bool:
+        if self._has_seller_promo_signal(title, body):
+            return False
+
         content = f"{title} {body}".lower()
         token_hits, phrase_hit = self._keyword_match_stats(content, keyword)
         if phrase_hit:
@@ -937,6 +963,10 @@ class RedditLeadCollector:
                 return True
         return False
 
+    def _has_seller_promo_signal(self, title: str, body: str) -> bool:
+        content = f"{title} {body}".lower()
+        return any(signal in content for signal in SELLER_PROMO_SIGNALS)
+
     def _determine_match_source(
         self,
         title: str,
@@ -965,6 +995,7 @@ class RedditLeadCollector:
 
         intent_bonus = 2.0 if self._has_intent_signal(title, body) else 0.0
         low_intent_penalty = 2.5 if any(signal in content for signal in LOW_INTENT_SIGNALS) else 0.0
+        seller_promo_penalty = 9.0 if self._has_seller_promo_signal(title, body) else 0.0
 
         # Extra relevance boost when a high-specificity buyer-intent phrase is
         # detected in the comment thread.  Kept intentionally modest (3.5) so it
@@ -982,7 +1013,10 @@ class RedditLeadCollector:
         keyword_score = (token_hits * 4.0) + (6.0 if phrase_hit else 0.0)
         engagement_score = (min(num_comments, 80) * 0.02) + (min(max(score, 0), 200) * 0.004)
 
-        return max(0.0, keyword_score + intent_bonus + comment_intent_bonus + engagement_score - low_intent_penalty)
+        return max(
+            0.0,
+            keyword_score + intent_bonus + comment_intent_bonus + engagement_score - low_intent_penalty - seller_promo_penalty,
+        )
 
     def _per_query_limit(self, request_limit: int, subreddit_count: int) -> int:
         return min(MAX_QUERY_LIMIT, max(MIN_QUERY_LIMIT, request_limit // max(subreddit_count, 1)))

@@ -98,6 +98,8 @@ class GeminiLeadScorer:
             "Return ONLY a JSON array sorted by lead_score descending. No markdown, no explanation text.\n"
             "Each row schema: {post_id, lead_score, qualification_reason, suggested_outreach}.\n"
             "Scoring rubric: ICP fit 40, explicit pain/intent 30, urgency 15, engagement signal 15.\n"
+            "Critical rule: prioritize posts where the author is seeking help, recommendations, hiring support, or a solution.\n"
+            "Critical rule: heavily down-score (0-20) posts where the author is advertising their own services, availability, or portfolio.\n"
             "qualification_reason: <= 160 chars and specific.\n"
             "suggested_outreach: <= 220 chars, actionable, personalized, no hype.\n"
             f"Business: {compact_business}\n"
