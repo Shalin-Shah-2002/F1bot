@@ -119,6 +119,37 @@ LOW_INTENT_SIGNALS = (
 )
 
 
+def _normalize_promo_text(text: str) -> str:
+    lowered = text.lower().replace("'", "")
+    normalized = re.sub(r"[^a-z0-9\s]", " ", lowered)
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    return normalized
+
+
+_SELLER_PROMO_CONTEXT_PHRASES = (
+    "for hire",
+    "open to work",
+    "open for work",
+)
+_SELLER_PROMO_EXACT_PHRASES = tuple(
+    signal for signal in SELLER_PROMO_SIGNALS if signal not in _SELLER_PROMO_CONTEXT_PHRASES
+)
+_SELLER_PROMO_EXACT_PATTERNS = tuple(
+    re.compile(rf"\b{re.escape(_normalize_promo_text(signal))}\b")
+    for signal in _SELLER_PROMO_EXACT_PHRASES
+    if _normalize_promo_text(signal)
+)
+_SELLER_PROMO_CONTEXT_TOKENS = {"i", "im", "me"}
+_SELLER_PROMO_CONTEXT_WINDOW = 3
+_SELLER_PROMO_CONTEXT_PHRASE_TOKENS = tuple(
+    tuple(_normalize_promo_text(phrase).split())
+    for phrase in _SELLER_PROMO_CONTEXT_PHRASES
+    if _normalize_promo_text(phrase)
+)
+
+
+
+
 # Maximum number of comments to keep per post during scan-time intent checks.
 _MAX_COMMENTS_TO_FETCH = 10
 # Per-comment character limit stored on CandidatePost.
@@ -964,8 +995,34 @@ class RedditLeadCollector:
         return False
 
     def _has_seller_promo_signal(self, title: str, body: str) -> bool:
-        content = f"{title} {body}".lower()
-        return any(signal in content for signal in SELLER_PROMO_SIGNALS)
+        content = _normalize_promo_text(f"{title} {body}")
+        if not content:
+            return False
+
+        for pattern in _SELLER_PROMO_EXACT_PATTERNS:
+            if pattern.search(content):
+                return True
+
+        tokens = content.split()
+        token_count = len(tokens)
+        if not tokens:
+            return False
+
+        for phrase_tokens in _SELLER_PROMO_CONTEXT_PHRASE_TOKENS:
+            if not phrase_tokens:
+                continue
+            phrase_len = len(phrase_tokens)
+            if phrase_len == 0 or phrase_len > token_count:
+                continue
+            for index in range(token_count - phrase_len + 1):
+                if tokens[index:index + phrase_len] != list(phrase_tokens):
+                    continue
+                window_start = max(0, index - _SELLER_PROMO_CONTEXT_WINDOW)
+                window_end = min(token_count, index + phrase_len + _SELLER_PROMO_CONTEXT_WINDOW)
+                if any(token in _SELLER_PROMO_CONTEXT_TOKENS for token in tokens[window_start:window_end]):
+                    return True
+
+        return False
 
     def _determine_match_source(
         self,

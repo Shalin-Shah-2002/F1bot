@@ -109,6 +109,29 @@ class TestSellerPromoSignalsList:
             assert phrase in SELLER_PROMO_SIGNALS, f"Expected '{phrase}' in SELLER_PROMO_SIGNALS"
 
 
+class TestSellerPromoSignalDetection:
+    def test_detects_explicit_self_promo_phrase(self) -> None:
+        c = _collector()
+        assert c._has_seller_promo_signal(
+            "Freelancer here - available for hire",
+            "DM me for backend work.",
+        )
+
+    def test_requires_first_person_context_for_hire_language(self) -> None:
+        c = _collector()
+        assert not c._has_seller_promo_signal(
+            "We are hiring a developer",
+            "Our company is open to work with new contractors.",
+        )
+
+    def test_contact_phrase_requires_first_person(self) -> None:
+        c = _collector()
+        assert not c._has_seller_promo_signal(
+            "How do you contact me in Reddit chat?",
+            "Trying to figure out messages in the app.",
+        )
+
+
 # ---------------------------------------------------------------------------
 # _has_comment_intent_signal
 # ---------------------------------------------------------------------------
